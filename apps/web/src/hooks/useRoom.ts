@@ -9,6 +9,9 @@ import { useClock } from './useClock'
 import { useSync } from './useSync'
 import type { PlayerAdapter } from '../lib/players/index'
 
+/** Numero maximo de mensagens e reactions mantidas no estado */
+const MAX_HISTORY = 200
+
 export interface RoomIdentity {
   displayName: string
   avatar: string
@@ -34,12 +37,16 @@ export interface UseRoomResult {
   peers: PresencePeer[]
   messages: ChatMessage[]
   reactions: ReactionItem[]
+  /** userId proprio do cliente (enviado pelo servidor via evento welcome) */
+  localUserId: string | null
   /** Envia play para o servidor */
   sendPlay(time: number): void
   sendPause(time: number): void
   sendSeek(time: number): void
   sendChat(text: string): void
   sendReaction(emoji: string): void
+  /** Envia set-host-lock; o servidor ignora se o remetente nao for o host */
+  sendSetHostLock(locked: boolean): void
   connected: boolean
   /** Adapter injetado por RoomPlayer; useSync usa internamente */
   _setAdapter?: (adapter: PlayerAdapter | null) => void
@@ -58,118 +65,141 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
   const [reactions, setReactions] = useState<ReactionItem[]>([])
   const [connected, setConnected] = useState(false)
   const [adapter, setAdapter] = useState<PlayerAdapter | null>(null)
+  /** userId informado pelo servidor via evento welcome */
+  const [localUserId, setLocalUserId] = useState<string | null>(null)
 
+  // wsClient via state para que useClock reaja quando o cliente estiver disponivel
+  const [wsClient, setWsClient] = useState<WsClient | null>(null)
   const wsClientRef = useRef<WsClient | null>(null)
 
-  const { serverNow } = useClock(wsClientRef.current)
+  const { serverNow, onPong } = useClock(wsClient)
   useSync(roomState, adapter, serverNow)
 
-  const handleEvent = useCallback((event: ServerEvent) => {
-    switch (event.type) {
-      case 'room-state':
-        setRoomState({
-          roomId: event.roomId,
-          mediaUrl: event.mediaUrl,
-          mediaType: event.mediaType,
-          playing: event.playing,
-          positionSecs: event.positionSecs,
-          lastEventAt: event.lastEventAt,
-          playbackRate: event.playbackRate,
-          hostId: event.hostId,
-          hostLock: event.hostLock,
-        })
-        setPeers(event.peers)
-        setConnected(true)
-        break
+  const handleEvent = useCallback(
+    (event: ServerEvent) => {
+      switch (event.type) {
+        case 'welcome':
+          setLocalUserId(event.userId)
+          break
 
-      case 'play':
-        setRoomState((prev) =>
-          prev
-            ? {
-                ...prev,
-                playing: true,
-                positionSecs: event.time,
-                lastEventAt: event.when - 300,
-              }
-            : prev
-        )
-        break
+        case 'room-state':
+          setRoomState({
+            roomId: event.roomId,
+            mediaUrl: event.mediaUrl,
+            mediaType: event.mediaType,
+            playing: event.playing,
+            positionSecs: event.positionSecs,
+            lastEventAt: event.lastEventAt,
+            playbackRate: event.playbackRate,
+            hostId: event.hostId,
+            hostLock: event.hostLock,
+          })
+          setPeers(event.peers)
+          setConnected(true)
+          break
 
-      case 'pause':
-        setRoomState((prev) =>
-          prev
-            ? {
-                ...prev,
-                playing: false,
-                positionSecs: event.time,
-                lastEventAt: event.serverTime,
-              }
-            : prev
-        )
-        break
+        case 'play':
+          setRoomState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  playing: true,
+                  positionSecs: event.time,
+                  lastEventAt: event.when - 300,
+                }
+              : prev
+          )
+          break
 
-      case 'seek':
-        setRoomState((prev) =>
-          prev
-            ? { ...prev, positionSecs: event.time, lastEventAt: Date.now() }
-            : prev
-        )
-        break
+        case 'pause':
+          setRoomState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  playing: false,
+                  positionSecs: event.time,
+                  lastEventAt: event.serverTime,
+                }
+              : prev
+          )
+          break
 
-      case 'join':
-        setPeers((prev) => {
-          if (prev.some((p) => p.userId === event.userId)) return prev
-          return [
-            ...prev,
-            {
-              userId: event.userId,
-              displayName: event.displayName,
-              avatar: event.avatar,
-            },
-          ]
-        })
-        break
+        case 'seek':
+          setRoomState((prev) =>
+            prev
+              ? { ...prev, positionSecs: event.time, lastEventAt: Date.now() }
+              : prev
+          )
+          break
 
-      case 'leave':
-        setPeers((prev) => prev.filter((p) => p.userId !== event.userId))
-        break
+        case 'join':
+          setPeers((prev) => {
+            if (prev.some((p) => p.userId === event.userId)) return prev
+            return [
+              ...prev,
+              {
+                userId: event.userId,
+                displayName: event.displayName,
+                avatar: event.avatar,
+              },
+            ]
+          })
+          break
 
-      case 'host-change':
-        setRoomState((prev) =>
-          prev ? { ...prev, hostId: event.hostId } : prev
-        )
-        break
+        case 'leave':
+          setPeers((prev) => prev.filter((p) => p.userId !== event.userId))
+          break
 
-      case 'chat':
-        setMessages((prev) => [
-          ...prev,
-          {
-            userId: event.userId,
-            displayName: event.displayName,
-            text: event.text,
-            ts: event.ts,
-          },
-        ])
-        break
+        case 'host-change':
+          setRoomState((prev) =>
+            prev ? { ...prev, hostId: event.hostId } : prev
+          )
+          break
 
-      case 'reaction':
-        setReactions((prev) => [
-          ...prev,
-          {
-            id: uniqueReactionId(),
-            userId: event.userId,
-            emoji: event.emoji,
-            ts: event.ts,
-          },
-        ])
-        break
+        case 'host-lock':
+          setRoomState((prev) =>
+            prev ? { ...prev, hostLock: event.locked } : prev
+          )
+          break
 
-      case 'clock-pong':
-        // Roteado para useClock via ref publica (_handlePong)
-        // Ver nota em useClock.ts sobre ponto de integracao
-        break
-    }
-  }, [])
+        case 'chat':
+          setMessages((prev) => {
+            const next = [
+              ...prev,
+              {
+                userId: event.userId,
+                displayName: event.displayName,
+                text: event.text,
+                ts: event.ts,
+              },
+            ]
+            return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
+          })
+          break
+
+        case 'reaction':
+          setReactions((prev) => {
+            const next = [
+              ...prev,
+              {
+                id: uniqueReactionId(),
+                userId: event.userId,
+                emoji: event.emoji,
+                ts: event.ts,
+              },
+            ]
+            return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
+          })
+          break
+
+        case 'clock-pong':
+          // Delega para o handler exposto por useClock via retorno do hook
+          onPong(event.t1, event.t2, event.t3, 8)
+          break
+      }
+    },
+    [onPong]
+  )
 
   useEffect(() => {
     // Determina a URL do WS:
@@ -192,15 +222,18 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
     })
 
     wsClientRef.current = client
+    setWsClient(client)
 
     return () => {
       client.close()
       wsClientRef.current = null
+      setWsClient(null)
       setConnected(false)
       setRoomState(null)
       setPeers([])
       setMessages([])
       setReactions([])
+      setLocalUserId(null)
     }
   }, [roomId, identity.displayName, identity.avatar, handleEvent])
 
@@ -224,16 +257,22 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
     wsClientRef.current?.send({ type: 'reaction', emoji })
   }, [])
 
+  const sendSetHostLock = useCallback((locked: boolean) => {
+    wsClientRef.current?.send({ type: 'set-host-lock', locked })
+  }, [])
+
   return {
     roomState,
     peers,
     messages,
     reactions,
+    localUserId,
     sendPlay,
     sendPause,
     sendSeek,
     sendChat,
     sendReaction,
+    sendSetHostLock,
     connected,
     _setAdapter: setAdapter,
   }

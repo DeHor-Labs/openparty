@@ -47,18 +47,28 @@ function loadYouTubeApi(): Promise<void> {
   if (apiPromise) return apiPromise
 
   apiPromise = new Promise((resolve) => {
-    window.onYouTubeIframeAPIReady = () => {
-      apiLoaded = true
-      resolve()
-    }
-
+    // Caso o script ja esteja no DOM e a API ja esteja pronta
     if (document.querySelector('script[src*="youtube.com/iframe_api"]')) {
-      // Script ja no DOM; checar se API ja disponivel
       if (window.YT?.Player) {
+        apiLoaded = true
+        resolve()
+        return
+      }
+      // Script esta no DOM mas window.YT ainda nao carregou:
+      // encadeia no callback global sem adicionar novo script.
+      const prevReady = window.onYouTubeIframeAPIReady
+      window.onYouTubeIframeAPIReady = () => {
+        prevReady?.()
         apiLoaded = true
         resolve()
       }
       return
+    }
+
+    // Primeiro carregamento: injeta o script e aguarda o callback global
+    window.onYouTubeIframeAPIReady = () => {
+      apiLoaded = true
+      resolve()
     }
 
     const script = document.createElement('script')

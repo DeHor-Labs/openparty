@@ -54,7 +54,7 @@ describe('RoomControls', () => {
     expect(onPause).toHaveBeenCalledWith(42)
   })
 
-  it('nao exibe toggle host-lock para nao-host', () => {
+  it('exibe toggle host-lock para nao-host com aria-disabled', () => {
     render(
       <RoomControls
         roomState={makeState()}
@@ -64,10 +64,12 @@ describe('RoomControls', () => {
         onSeek={vi.fn()}
       />
     )
-    expect(screen.queryByRole('switch', { name: /host.lock/i })).toBeNull()
+    const toggle = screen.getByRole('switch', { name: /host.lock/i })
+    expect(toggle).toBeDefined()
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('exibe toggle host-lock para host', () => {
+  it('exibe toggle host-lock para host sem aria-disabled', () => {
     render(
       <RoomControls
         roomState={makeState({ hostLock: false })}
@@ -77,6 +79,56 @@ describe('RoomControls', () => {
         onSeek={vi.fn()}
       />
     )
-    expect(screen.getByRole('switch', { name: /host.lock/i })).toBeDefined()
+    const toggle = screen.getByRole('switch', { name: /host.lock/i })
+    expect(toggle).toBeDefined()
+    expect(toggle.getAttribute('aria-disabled')).toBe('false')
+  })
+
+  it('chama onSetHostLock com true ao clicar no toggle quando hostLock=false e isHost', () => {
+    const onSetHostLock = vi.fn()
+    render(
+      <RoomControls
+        roomState={makeState({ hostLock: false })}
+        isHost
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onSeek={vi.fn()}
+        onSetHostLock={onSetHostLock}
+      />
+    )
+    fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
+    expect(onSetHostLock).toHaveBeenCalledWith(true)
+  })
+
+  it('chama onSetHostLock com false ao clicar no toggle quando hostLock=true e isHost', () => {
+    const onSetHostLock = vi.fn()
+    render(
+      <RoomControls
+        roomState={makeState({ hostLock: true })}
+        isHost
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onSeek={vi.fn()}
+        onSetHostLock={onSetHostLock}
+      />
+    )
+    fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
+    expect(onSetHostLock).toHaveBeenCalledWith(false)
+  })
+
+  it('nao chama onSetHostLock quando nao-host clica no toggle', () => {
+    const onSetHostLock = vi.fn()
+    render(
+      <RoomControls
+        roomState={makeState({ hostLock: false })}
+        isHost={false}
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onSeek={vi.fn()}
+        onSetHostLock={onSetHostLock}
+      />
+    )
+    fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
+    expect(onSetHostLock).not.toHaveBeenCalled()
   })
 })

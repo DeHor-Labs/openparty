@@ -57,6 +57,8 @@ export function createWsClient(options: WsClientOptions): WsClient {
     if (destroyed) return
 
     ws = new WebSocket(url)
+    // Flag que garante onClose chamado no maximo uma vez por instancia de socket
+    let closeFired = false
 
     ws.onopen = () => {
       reconnectAttempt = 0
@@ -78,12 +80,13 @@ export function createWsClient(options: WsClientOptions): WsClient {
     }
 
     ws.onclose = (_evt) => {
-      if (destroyed) {
-        onClose?.()
-        return
-      }
+      // Garante que onClose nao seja disparado mais de uma vez por fechamento
+      if (closeFired) return
+      closeFired = true
 
       onClose?.()
+
+      if (destroyed) return
 
       // Reconexao com backoff exponencial
       const delay = Math.min(

@@ -7,14 +7,7 @@ const RECALIBRATE_PINGS = 3
 const RECALIBRATE_INTERVAL_MS = 60_000
 const PING_INTERVAL_MS = 80
 
-export interface UseClockResult {
-  /** Date.now() + offset calibrado */
-  serverNow: () => number
-  /** true enquanto calibracao inicial (8 pings) nao terminou */
-  calibrating: boolean
-}
-
-// Helper exportado para useRoom injetar pongs sem acoplamento direto
+/** Handler chamado por useRoom ao receber um evento clock-pong do servidor */
 export type ClockPongHandler = (
   t1: number,
   t2: number,
@@ -22,11 +15,25 @@ export type ClockPongHandler = (
   totalPings: number
 ) => void
 
+export interface UseClockResult {
+  /** Date.now() + offset calibrado */
+  serverNow: () => number
+  /** true enquanto calibracao inicial (8 pings) nao terminou */
+  calibrating: boolean
+  /**
+   * Handler que deve ser chamado por useRoom ao receber clock-pong.
+   * Recebe os quatro campos (t1, t2, t3, totalPings) e atualiza o offset.
+   */
+  onPong: ClockPongHandler
+}
+
 /**
  * Envia INITIAL_PINGS pings na entrada e recalibra com RECALIBRATE_PINGS pings
  * a cada RECALIBRATE_INTERVAL_MS.
  *
- * Requer o WsClient ja conectado; ignora silenciosamente se wsClient for null.
+ * Recebe o WsClient via useState (nao via ref) para garantir que o effect
+ * de envio de pings seja disparado quando o cliente estiver disponivel.
+ * Ignora silenciosamente se wsClient for null.
  */
 export function useClock(wsClient: WsClient | null): UseClockResult {
   const [calibrating, setCalibrating] = useState(true)
@@ -43,8 +50,8 @@ export function useClock(wsClient: WsClient | null): UseClockResult {
     wsClient.send({ type: 'clock-ping', t1 })
   }, [wsClient])
 
-  const handlePong = useCallback(
-    (t1: number, t2: number, t3: number, totalPings: number) => {
+  const onPong = useCallback<ClockPongHandler>(
+    (t1, t2, t3, totalPings) => {
       const t4 = Date.now()
       if (!pendingRef.current.has(t1)) return
       pendingRef.current.delete(t1)
@@ -98,9 +105,5 @@ export function useClock(wsClient: WsClient | null): UseClockResult {
     return () => clearInterval(timer)
   }, [wsClient, calibrating, sendPing])
 
-  // Expor handlePong para que useRoom possa injetar eventos clock-pong
-  // via ref publica - padrao de integracao documentado em useRoom.
-  ;(useClock as unknown as { _handlePong: typeof handlePong })._handlePong = handlePong
-
-  return { serverNow, calibrating }
+  return { serverNow, calibrating, onPong }
 }

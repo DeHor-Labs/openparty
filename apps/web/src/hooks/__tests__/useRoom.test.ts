@@ -26,15 +26,17 @@ vi.mock('../../lib/ws-client', () => ({
   },
 }))
 
-// Mock de useClock: retorna serverNow = Date.now() e calibrating=false
+// Mock de useClock: retorna serverNow = Date.now(), calibrating=false e onPong como fn
+const mockOnPong = vi.fn()
 vi.mock('../useClock', () => ({
   useClock: () => ({
     serverNow: () => Date.now(),
     calibrating: false,
+    onPong: mockOnPong,
   }),
 }))
 
-// Mock de useSync: nao faz nada (logica de sync testada na Task 10)
+// Mock de useSync: nao faz nada (logica de sync testada separadamente)
 vi.mock('../useSync', () => ({
   useSync: () => undefined,
 }))
@@ -55,6 +57,7 @@ describe('useRoom', () => {
   beforeEach(() => {
     capturedOnEvent = null
     capturedOptions = null
+    mockOnPong.mockClear()
   })
 
   afterEach(() => {
@@ -69,6 +72,7 @@ describe('useRoom', () => {
     expect(result.current.peers).toEqual([])
     expect(result.current.messages).toEqual([])
     expect(result.current.reactions).toEqual([])
+    expect(result.current.localUserId).toBeNull()
   })
 
   it('atualiza roomState ao receber room-state do servidor', async () => {
@@ -87,6 +91,73 @@ describe('useRoom', () => {
     expect(result.current.roomState?.roomId).toBe('room-1')
     expect(result.current.peers).toHaveLength(1)
     expect(result.current.connected).toBe(true)
+  })
+
+  it('armazena localUserId ao receber evento welcome', async () => {
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'welcome', userId: 'user-abc' })
+    })
+
+    expect(result.current.localUserId).toBe('user-abc')
+  })
+
+  it('atualiza hostLock ao receber evento host-lock', async () => {
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({
+        type: 'room-state',
+        ...BASE_ROOM_STATE,
+        hostLock: false,
+        peers: [],
+      })
+      capturedOnEvent?.({ type: 'host-lock', locked: true })
+    })
+
+    expect(result.current.roomState?.hostLock).toBe(true)
+  })
+
+  it('roteia clock-pong para onPong de useClock', async () => {
+    renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({
+        type: 'clock-pong',
+        t1: 1000,
+        t2: 1010,
+        t3: 1011,
+      })
+    })
+
+    expect(mockOnPong).toHaveBeenCalledWith(1000, 1010, 1011, 8)
+  })
+
+  it('sendSetHostLock envia evento set-host-lock para o servidor', async () => {
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({
+        type: 'room-state',
+        ...BASE_ROOM_STATE,
+        peers: [],
+      })
+    })
+
+    act(() => {
+      result.current.sendSetHostLock(true)
+    })
+
+    expect(mockSend).toHaveBeenCalledWith({ type: 'set-host-lock', locked: true })
   })
 
   it('adiciona peer ao receber evento join', async () => {
@@ -163,6 +234,51 @@ describe('useRoom', () => {
     expect(result.current.messages).toHaveLength(2)
     expect(result.current.messages[0].text).toBe('oi pessoal')
     expect(result.current.messages[1].text).toBe('oi!')
+  })
+
+  it('limita messages a 200 itens mais recentes', async () => {
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'room-state', ...BASE_ROOM_STATE, peers: [] })
+      // Envia 205 mensagens
+      for (let i = 0; i < 205; i++) {
+        capturedOnEvent?.({
+          type: 'chat',
+          userId: 'u1',
+          displayName: 'X',
+          text: `msg-${i}`,
+          ts: i,
+        })
+      }
+    })
+
+    expect(result.current.messages).toHaveLength(200)
+    // Garante que sao as 200 mais recentes (msg-5 em diante)
+    expect(result.current.messages[0].text).toBe('msg-5')
+    expect(result.current.messages[199].text).toBe('msg-204')
+  })
+
+  it('limita reactions a 200 itens mais recentes', async () => {
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'room-state', ...BASE_ROOM_STATE, peers: [] })
+      for (let i = 0; i < 205; i++) {
+        capturedOnEvent?.({
+          type: 'reaction',
+          userId: 'u1',
+          emoji: '🔥',
+          ts: i,
+        })
+      }
+    })
+
+    expect(result.current.reactions).toHaveLength(200)
   })
 
   it('sendChat chama wsClient.send com evento chat', async () => {
@@ -265,7 +381,6 @@ describe('useRoom', () => {
   })
 
   it('usa caminho relativo /ws/<roomId> quando VITE_SERVER_URL nao esta definida', () => {
-    // Em ambiente de teste, import.meta.env.VITE_SERVER_URL nao esta definida
     renderHook(() =>
       useRoom('sala-abc', { displayName: 'Nikolas', avatar: '🎬' })
     )
@@ -274,7 +389,6 @@ describe('useRoom', () => {
   })
 
   it('usa VITE_SERVER_URL para construir wsUrl quando definida', () => {
-    // vi.stubEnv e a forma correta de sobrescrever env vars no Vitest
     vi.stubEnv('VITE_SERVER_URL', 'http://server.example.com:3000')
 
     renderHook(() =>

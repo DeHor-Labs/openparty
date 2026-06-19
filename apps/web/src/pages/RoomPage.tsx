@@ -19,11 +19,13 @@ export function RoomPage() {
     peers,
     messages,
     reactions,
+    localUserId,
     sendPlay,
     sendPause,
     sendSeek,
     sendChat,
     sendReaction,
+    sendSetHostLock,
     connected,
     _setAdapter,
   } = useRoom(roomId, { displayName, avatar })
@@ -45,7 +47,9 @@ export function RoomPage() {
     )
   }
 
-  const isHost = roomState.hostId === displayName
+  // Compara userId proprio (informado pelo servidor) com hostId da sala.
+  // Enquanto localUserId for null (welcome ainda nao chegou), isHost permanece false.
+  const isHost = localUserId != null && roomState.hostId === localUserId
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -64,6 +68,7 @@ export function RoomPage() {
           onPlay={sendPlay}
           onPause={sendPause}
           onSeek={sendSeek}
+          onSetHostLock={sendSetHostLock}
         />
       </main>
       <RoomSidebar peers={peers} messages={messages} onSendMessage={sendChat} />

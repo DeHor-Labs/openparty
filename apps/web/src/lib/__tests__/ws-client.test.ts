@@ -277,4 +277,29 @@ describe('createWsClient', () => {
     client.send(msg)
     expect(ws.sentMessages).toHaveLength(1)
   })
+
+  // --- Teste MED-4: onClose chamado no maximo uma vez por fechamento ---
+
+  it('chama onClose exatamente uma vez ao fechar via client.close()', () => {
+    const onClose = vi.fn()
+    const client = createWsClient(makeOptions({ onClose }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+    client.close()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('chama onClose exatamente uma vez em queda inesperada seguida de close()', () => {
+    const onClose = vi.fn()
+    const client = createWsClient(makeOptions({ onClose, reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    // Simula queda e logo em seguida close() explicito antes da reconexao
+    ws.simulateDrop()
+    client.close()
+
+    // onClose deve ter sido chamado apenas uma vez (pelo simulateDrop)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })

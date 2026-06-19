@@ -1,5 +1,5 @@
 // apps/web/src/components/room/ReactionsLayer.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactionItem } from '../../hooks/useRoom'
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '👏', '🔥', '💯']
@@ -19,16 +19,29 @@ interface ReactionsLayerProps {
 
 export function ReactionsLayer({ reactions, onReact }: ReactionsLayerProps) {
   const [floating, setFloating] = useState<FloatingEmoji[]>([])
+  // Mapa de posicao horizontal por reaction.id para evitar que o emoji
+  // "pule" quando uma nova reaction chega e o array e recalculado.
+  const xPositionsRef = useRef<Map<string, number>>(new Map())
 
   // Converte reactions recentes em emojis flutuantes
   useEffect(() => {
     const now = Date.now()
     const recent = reactions.filter((r) => now - r.ts < FLOAT_DURATION_MS)
+
+    // Garante posicao x estavel: reutiliza valor ja gerado para ids conhecidos
+    const nextMap = new Map<string, number>()
+    recent.forEach((r) => {
+      const existing = xPositionsRef.current.get(r.id)
+      nextMap.set(r.id, existing ?? Math.random() * 80 + 10)
+    })
+    // Descarta ids que saíram (nao estao mais em recent)
+    xPositionsRef.current = nextMap
+
     setFloating(
       recent.map((r) => ({
         id: r.id,
         emoji: r.emoji,
-        x: Math.random() * 80 + 10, // % horizontal
+        x: xPositionsRef.current.get(r.id)!,
       }))
     )
   }, [reactions])

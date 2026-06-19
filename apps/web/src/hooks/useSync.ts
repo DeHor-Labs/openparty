@@ -13,6 +13,9 @@ const SYNC_LOOP_INTERVAL_MS = 1500
  * 2. Le posicao atual do adapter
  * 3. Chama decideSyncAction
  * 4. Aplica a acao no adapter (ignore/adjust-rate/seek)
+ *
+ * Ao decidir 'ignore', reseta a taxa de reproducao para roomState.playbackRate
+ * para desfazer qualquer ajuste temporario de um ciclo anterior de 'adjust-rate'.
  */
 export function useSync(
   roomState: RoomState | null,
@@ -38,6 +41,8 @@ export function useSync(
 
       switch (decision.action) {
         case 'ignore':
+          // Reseta taxa para o valor normal da sala, desfazendo adjust-rate anteriores
+          adapter.setPlaybackRate(roomState.playbackRate)
           break
         case 'adjust-rate':
           adapter.setPlaybackRate(decision.rate)
