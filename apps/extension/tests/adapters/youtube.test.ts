@@ -241,6 +241,14 @@ describe('createYouTubeAdapter', () => {
     expect(handler).not.toHaveBeenCalled()
   })
 
+  it('getServiceType() retorna "youtube"', async () => {
+    configurarDocumentoSemAd(mockVideo)
+    const { createYouTubeAdapter } = await import('../../src/adapters/youtube')
+    const adapter = await createYouTubeAdapter()
+    expect(adapter?.getServiceType()).toBe('youtube')
+    adapter?.destroy()
+  })
+
   it('destroy() remove todos os listeners do video', async () => {
     configurarDocumentoSemAd(mockVideo)
     const { createYouTubeAdapter } = await import('../../src/adapters/youtube')

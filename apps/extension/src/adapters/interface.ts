@@ -2,6 +2,8 @@
 // Contrato comum para todos os adapters de servico de streaming.
 // Superset da interface PlayerAdapter de apps/web/src/lib/players/index.ts.
 
+import type { StreamingServiceType } from '../lib/sync'
+
 /**
  * Eventos emitidos pelo adapter para o content script.
  * Extensao de PlayerEventName com ad-start e ad-end.
@@ -41,6 +43,11 @@ export interface ServiceAdapter {
   isAd(): boolean
   /** Retorna o estado atual do player */
   getPlaybackState(): PlaybackState
+  /**
+   * Retorna o tipo de servico de streaming, usado por decideSyncAction para
+   * aplicar thresholds e estrategias de correcao corretos por plataforma.
+   */
+  getServiceType(): StreamingServiceType
   /** Registra listener para evento do player */
   on(event: AdapterEventName, handler: () => void): void
   /** Remove listener registrado anteriormente */

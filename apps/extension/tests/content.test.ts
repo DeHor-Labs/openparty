@@ -57,6 +57,7 @@ interface MockAdapter {
   seekTo: ReturnType<typeof vi.fn>
   getCurrentTime: ReturnType<typeof vi.fn>
   getPlaybackState: ReturnType<typeof vi.fn>
+  getServiceType: ReturnType<typeof vi.fn>
   isAd: ReturnType<typeof vi.fn>
   getDuration: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
@@ -75,6 +76,7 @@ function criarMockAdapter(): MockAdapter {
     seekTo: vi.fn().mockResolvedValue(undefined),
     getCurrentTime: vi.fn().mockReturnValue(10),
     getPlaybackState: vi.fn().mockReturnValue('paused'),
+    getServiceType: vi.fn().mockReturnValue('youtube'),
     isAd: vi.fn().mockReturnValue(false),
     getDuration: vi.fn().mockReturnValue(120),
     on: vi.fn((event: string, handler: () => void) => {
@@ -100,6 +102,18 @@ vi.mock('../src/adapters/youtube', () => ({
 
 vi.mock('../src/lib/storage', () => ({
   storageGet: vi.fn().mockResolvedValue({ roomId: 'sala-teste' }),
+}))
+
+// Mock do overlay: evita montar Shadow DOM e setInterval do ReactionsLayer nos testes
+// de content-main, que focam apenas no roteamento adapter <-> background.
+vi.mock('../src/content/overlay/chat-overlay', () => ({
+  criarChatOverlay: vi.fn(() => ({
+    adicionarMensagem: vi.fn(),
+    adicionarReacao: vi.fn(),
+    atualizarParticipantes: vi.fn(),
+    atualizarSyncStatus: vi.fn(),
+    destruir: vi.fn(),
+  })),
 }))
 
 // ---------------------------------------------------------------------------
