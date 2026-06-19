@@ -1,5 +1,5 @@
-// tests/adapters/netflix.test.ts
-// Testes unitarios para o adapter de Netflix.
+// tests/adapters/disney.test.ts
+// Testes unitarios para o adapter do Disney+.
 // Usa mock de HTMLVideoElement para nao depender do DOM real.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -29,7 +29,9 @@ function criarMockVideo(overrides: Partial<HTMLVideoElement> = {}): HTMLVideoEle
         listeners[event] = listeners[event].filter((h) => h !== handler)
       }
     }),
-    // M1: getBoundingClientRect necessario para a validacao de area do video principal
+    // checkVisibility necessaria para a heuristica de selecao do Disney+
+    checkVisibility: vi.fn(() => true),
+    // getBoundingClientRect necessaria para a validacao de area
     getBoundingClientRect: vi.fn(() => ({
       width: 1280,
       height: 720,
@@ -59,12 +61,11 @@ function criarMockVideo(overrides: Partial<HTMLVideoElement> = {}): HTMLVideoEle
 // ---------------------------------------------------------------------------
 
 /**
- * Configura document.querySelector para retornar o video fornecido
- * e nenhum elemento de UI de anuncio.
+ * Configura document.querySelector/querySelectorAll para retornar o video
+ * fornecido e nenhum elemento de UI de anuncio.
  */
 function configurarDocumentoSemAd(videoEl: HTMLVideoElement): void {
   vi.spyOn(document, 'querySelector').mockImplementation((selector: string) => {
-    if (selector === '.watch-video--player-view video') return videoEl as unknown as Element
     if (selector === 'video') return videoEl as unknown as Element
     // Nenhum elemento de anuncio presente
     return null
@@ -87,22 +88,19 @@ function criarElementoAdVisivel(): Element {
 
 /**
  * Configura document.querySelector para simular UI de anuncio visivel.
- * Usa o seletor data-uia="ad-ui" que e o mais estavel.
+ * Usa o custom element <ad-badge-overlay> que e o sinal mais confiavel.
  * CR-MAJOR: o elemento retornado passa pelo filtro elementoVisivel().
  */
 function configurarDocumentoComAd(videoEl: HTMLVideoElement): void {
   const adEl = criarElementoAdVisivel()
 
   vi.spyOn(document, 'querySelector').mockImplementation((selector: string) => {
-    if (selector === '.watch-video--player-view video') return videoEl as unknown as Element
     if (selector === 'video') return videoEl as unknown as Element
     // Seletores de UI de anuncio retornam elemento com visibilidade simulada
     if (
-      selector === '[data-uia="ad-ui"]' ||
-      selector === '[data-uia="ad-skip-button"]' ||
-      selector === '[data-uia="ad-countdown"]' ||
-      selector === '.watch-video--skip-ad' ||
-      selector === '.nfp-ad-ui'
+      selector === 'ad-badge-overlay' ||
+      selector === '.ad-badge' ||
+      selector === '[data-testid="ad-badge"]'
     ) {
       return adEl
     }
@@ -118,24 +116,28 @@ function configurarDocumentoComAd(videoEl: HTMLVideoElement): void {
 // Testes basicos do adapter
 // ---------------------------------------------------------------------------
 
-describe('createNetflixAdapter', () => {
+describe('createDisneyAdapter', () => {
   let mockVideo: HTMLVideoElement
-  // CR-MINOR-2: preserva MutationObserver original
+  // CR-MINOR-2: preserva o MutationObserver original para restaurar no afterEach
   let MutationObserverOriginal: typeof MutationObserver
 
   beforeEach(() => {
     mockVideo = criarMockVideo()
     MutationObserverOriginal = globalThis.MutationObserver
     vi.clearAllMocks()
+    // MEDIUM-2: gate de path requer rota de player; define URL de video para testes basicos
+    history.pushState({}, '', '/video/test-id')
     configurarDocumentoSemAd(mockVideo)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
     vi.resetModules()
-    // CR-MINOR-2: restaura MutationObserver global, timers e URL
+    // CR-MINOR-2: restaura MutationObserver global
     globalThis.MutationObserver = MutationObserverOriginal
+    // CR-MINOR-2: restaura timers reais caso algum teste use fake timers
     vi.useRealTimers()
+    // CR-MINOR-2: reseta URL para raiz para nao vazar entre suites
     history.pushState({}, '', '/')
   })
 
@@ -151,10 +153,10 @@ describe('createNetflixAdapter', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
 
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearInterval', 'clearTimeout'] })
-    const promiseAdapter = createNetflixAdapter()
+    const promiseAdapter = createDisneyAdapter()
 
     // Avanca alem do VIDEO_WAIT_TIMEOUT_MS (8000ms)
     vi.advanceTimersByTime(9000)
@@ -166,8 +168,8 @@ describe('createNetflixAdapter', () => {
 
   it('retorna adapter quando elemento video esta presente', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter).not.toBeNull()
     adapter?.destroy()
   })
@@ -175,8 +177,8 @@ describe('createNetflixAdapter', () => {
   it('getCurrentTime retorna currentTime do video', async () => {
     mockVideo.currentTime = 120.5
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getCurrentTime()).toBe(120.5)
     adapter?.destroy()
   })
@@ -184,8 +186,8 @@ describe('createNetflixAdapter', () => {
   it('getDuration retorna duration do video', async () => {
     Object.defineProperty(mockVideo, 'duration', { value: 7200, writable: true, configurable: true })
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getDuration()).toBe(7200)
     adapter?.destroy()
   })
@@ -193,16 +195,16 @@ describe('createNetflixAdapter', () => {
   it('getDuration retorna 0 quando duration e NaN', async () => {
     Object.defineProperty(mockVideo, 'duration', { value: NaN, writable: true, configurable: true })
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getDuration()).toBe(0)
     adapter?.destroy()
   })
 
   it('play() chama video.play()', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     await adapter?.play()
     expect(mockVideo.play).toHaveBeenCalledOnce()
     adapter?.destroy()
@@ -210,8 +212,8 @@ describe('createNetflixAdapter', () => {
 
   it('pause() chama video.pause()', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     await adapter?.pause()
     expect(mockVideo.pause).toHaveBeenCalledOnce()
     adapter?.destroy()
@@ -219,8 +221,8 @@ describe('createNetflixAdapter', () => {
 
   it('seekTo() atualiza currentTime do video', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     await adapter?.seekTo(450.0)
     expect(mockVideo.currentTime).toBe(450.0)
     adapter?.destroy()
@@ -229,8 +231,8 @@ describe('createNetflixAdapter', () => {
   it('getPlaybackState() retorna "playing" quando video nao esta pausado', async () => {
     Object.defineProperty(mockVideo, 'paused', { value: false, writable: true, configurable: true })
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getPlaybackState()).toBe('playing')
     adapter?.destroy()
   })
@@ -238,8 +240,8 @@ describe('createNetflixAdapter', () => {
   it('getPlaybackState() retorna "paused" quando video esta pausado', async () => {
     Object.defineProperty(mockVideo, 'paused', { value: true, writable: true, configurable: true })
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getPlaybackState()).toBe('paused')
     adapter?.destroy()
   })
@@ -248,32 +250,32 @@ describe('createNetflixAdapter', () => {
     Object.defineProperty(mockVideo, 'readyState', { value: 1, writable: true, configurable: true })
     Object.defineProperty(mockVideo, 'paused', { value: false, writable: true, configurable: true })
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getPlaybackState()).toBe('buffering')
     adapter?.destroy()
   })
 
   it('getPlaybackState() retorna "ad" durante anuncio', async () => {
     configurarDocumentoComAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getPlaybackState()).toBe('ad')
     adapter?.destroy()
   })
 
   it('isAd() retorna true quando UI de anuncio esta presente', async () => {
     configurarDocumentoComAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.isAd()).toBe(true)
     adapter?.destroy()
   })
 
   it('isAd() retorna false quando UI de anuncio esta ausente', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.isAd()).toBe(false)
     adapter?.destroy()
   })
@@ -281,8 +283,8 @@ describe('createNetflixAdapter', () => {
   it('on("play") dispara callback ao receber evento nativo de play', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('play', handler)
@@ -296,8 +298,8 @@ describe('createNetflixAdapter', () => {
   it('on("pause") dispara callback ao receber evento nativo de pause', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('pause', handler)
@@ -311,8 +313,8 @@ describe('createNetflixAdapter', () => {
   it('on("seek") dispara callback ao receber evento nativo seeked', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('seek', handler)
@@ -326,8 +328,8 @@ describe('createNetflixAdapter', () => {
   it('on("buffering") dispara callback ao receber evento nativo waiting', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('buffering', handler)
@@ -341,8 +343,8 @@ describe('createNetflixAdapter', () => {
   it('on("ended") dispara callback ao receber evento nativo ended', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('ended', handler)
@@ -356,8 +358,8 @@ describe('createNetflixAdapter', () => {
   it('off() remove listener de evento', async () => {
     const videoInterno = criarMockVideo()
     configurarDocumentoSemAd(videoInterno)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('play', handler)
@@ -371,24 +373,24 @@ describe('createNetflixAdapter', () => {
 
   it('getServiceType() retorna "native-html5"', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter?.getServiceType()).toBe('native-html5')
     adapter?.destroy()
   })
 
   it('destroy() remove handlers nativos do video', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     adapter?.destroy()
     expect(mockVideo.removeEventListener).toHaveBeenCalled()
   })
 
   it('destroy() limpa todos os listeners registrados', async () => {
     configurarDocumentoSemAd(mockVideo)
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const handler = vi.fn()
     adapter?.on('play', handler)
@@ -404,11 +406,13 @@ describe('createNetflixAdapter', () => {
 // Testes de navegacao SPA
 // ---------------------------------------------------------------------------
 
-describe('SPA: re-resolucao de video ao trocar de episodio', () => {
+describe('SPA Disney+: re-resolucao de video ao trocar de episodio', () => {
   let MutationObserverOriginal: typeof MutationObserver
 
   beforeEach(() => {
     MutationObserverOriginal = globalThis.MutationObserver
+    // MEDIUM-2: gate de path requer rota de player
+    history.pushState({}, '', '/video/test-id')
   })
 
   afterEach(() => {
@@ -420,14 +424,7 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     history.pushState({}, '', '/')
   })
 
-  it('re-liga listeners ao novo video apos mudanca de URL via polling', async () => {
-    // Nota: o polling SPA tem intervalo de 800ms. Para testar sem esperar,
-    // usamos MutationObserver mock (resolucao imediata) e disparamos o popstate
-    // como proxy do mesmo handler de re-ligacao. O caminho de codigo do polling
-    // (deteccao de location.href diferente) e coberto pelo teste de popstate -
-    // ambos chamam o mesmo onSpaNavegacao internamente.
-    //
-    // Este teste verifica que o adapter registra um setInterval e o cancela no destroy.
+  it('inicia e cancela polling de SPA no ciclo de vida do adapter', async () => {
     const video = criarMockVideo()
 
     class MockMutationObserver {
@@ -439,21 +436,19 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
       if (sel === 'video') return video as unknown as Element
       return null
     })
     vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
 
-    // Espiona setInterval e clearInterval para verificar o ciclo de vida do polling
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter).not.toBeNull()
 
-    // O polling SPA deve ter sido iniciado via setInterval
+    // O polling SPA deve ter sido iniciado via setInterval com 800ms
     const chamouSetInterval = setIntervalSpy.mock.calls.some(
       ([, delay]) => delay === 800
     )
@@ -465,14 +460,12 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     expect(clearIntervalSpy).toHaveBeenCalled()
   })
 
-  it('re-liga listeners ao novo video apos evento popstate', async () => {
+  it('re-liga listeners ao novo video apos evento popstate em /video/:id', async () => {
     const videoOriginal = criarMockVideo()
     const videoNovo = criarMockVideo()
 
     let videoAtivo = videoOriginal
 
-    // MutationObserver mock para evitar que aguardarVideo fique esperando
-    // o timeout de 8s quando o video ja esta disponivel no mock
     class MockMutationObserver {
       observe = vi.fn()
       disconnect = vi.fn()
@@ -482,8 +475,6 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      // Seletor primario sempre retorna o video ativo - resolucao imediata
-      if (sel === '.watch-video--player-view video') return videoAtivo as unknown as Element
       if (sel === 'video') return videoAtivo as unknown as Element
       return null
     })
@@ -492,16 +483,15 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
       return [] as unknown as NodeListOf<Element>
     })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter).not.toBeNull()
 
     const pauseHandler = vi.fn()
     adapter?.on('pause', pauseHandler)
 
-    // Simula troca de episodio via back/forward a partir de uma URL /watch/:
-    // o spaPopstateHandler filtra por pathname /watch/, entao a URL precisa estar la.
-    history.pushState({}, '', '/watch/12345')
+    // Navega para /video/:id (rota de episodio do Disney+)
+    history.pushState({}, '', '/video/12345')
     videoAtivo = videoNovo
     window.dispatchEvent(new PopStateEvent('popstate'))
 
@@ -515,11 +505,91 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     history.pushState({}, '', '/')
   })
 
+  it('re-liga listeners ao novo video apos evento popstate em /play/:id', async () => {
+    const videoOriginal = criarMockVideo()
+    const videoNovo = criarMockVideo()
+
+    let videoAtivo = videoOriginal
+
+    class MockMutationObserver {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      constructor(public callback: MutationCallback) {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).MutationObserver = MockMutationObserver
+
+    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
+      if (sel === 'video') return videoAtivo as unknown as Element
+      return null
+    })
+    vi.spyOn(document, 'querySelectorAll').mockImplementation((sel: string) => {
+      if (sel === 'video') return [videoAtivo] as unknown as NodeListOf<Element>
+      return [] as unknown as NodeListOf<Element>
+    })
+
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
+    expect(adapter).not.toBeNull()
+
+    const playHandler = vi.fn()
+    adapter?.on('play', playHandler)
+
+    // Navega para /play/:id (rota alternativa do Disney+)
+    history.pushState({}, '', '/play/67890')
+    videoAtivo = videoNovo
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    // Aguarda re-resolucao: inclui SPA_RENAVIGATE_DELAY_MS=150ms + margem
+    await new Promise((r) => setTimeout(r, 200))
+
+    ;(videoNovo as unknown as { _dispatchEvent: (e: string) => void })._dispatchEvent('play')
+    expect(playHandler).toHaveBeenCalled()
+
+    adapter?.destroy()
+    history.pushState({}, '', '/')
+  })
+
+  it('NAO re-liga quando popstate navega para fora de /video/ e /play/', async () => {
+    const video = criarMockVideo()
+
+    class MockMutationObserver {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      constructor(public callback: MutationCallback) {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).MutationObserver = MockMutationObserver
+
+    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
+      if (sel === 'video') return video as unknown as Element
+      return null
+    })
+    vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
+
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
+
+    const removeListenerSpy = vi.spyOn(video, 'removeEventListener')
+    const chamadas = removeListenerSpy.mock.calls.length
+
+    // Navega para a home (fora de /video/ e /play/)
+    history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    await new Promise((r) => setTimeout(r, 20))
+
+    // removeEventListener nao deve ter sido chamado novamente (nenhuma re-ligacao)
+    expect(removeListenerSpy.mock.calls.length).toBe(chamadas)
+
+    adapter?.destroy()
+    history.pushState({}, '', '/')
+  })
+
   it('destroy() remove listener de popstate', async () => {
     const video = criarMockVideo()
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
       if (sel === 'video') return video as unknown as Element
       return null
     })
@@ -528,8 +598,8 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     const addSpy = vi.spyOn(window, 'addEventListener')
     const removeSpy = vi.spyOn(window, 'removeEventListener')
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     adapter?.destroy()
 
     const adicionouPopstate = addSpy.mock.calls.some(([evt]) => evt === 'popstate')
@@ -539,29 +609,54 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     expect(removeuPopstate).toBe(true)
   })
 
-  it('destroy() para o polling de URL SPA', async () => {
+  it('polling de location.href detecta mudanca de URL via pushState', async () => {
     const video = criarMockVideo()
-    configurarDocumentoSemAd(video)
 
+    class MockMutationObserver {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      constructor(public callback: MutationCallback) {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).MutationObserver = MockMutationObserver
+
+    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
+      if (sel === 'video') return video as unknown as Element
+      return null
+    })
     vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
 
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearInterval', 'clearTimeout'] })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
+    expect(adapter).not.toBeNull()
+
+    const removeListenerSpy = vi.spyOn(video, 'removeEventListener')
+
+    // Simula pushState para /video/:id
+    history.pushState({}, '', '/video/99999')
+
+    // Avanca: 800ms (polling) + 150ms (SPA_RENAVIGATE_DELAY_MS) + margem
+    vi.advanceTimersByTime(951)
+
+    // Aguarda resolucao das promises internas do renavigate
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Verifica que o polling reagiu a mudanca de URL
+    expect(removeListenerSpy).toHaveBeenCalled()
+
     adapter?.destroy()
-
-    // clearInterval deve ter sido chamado para o polling de SPA
-    expect(clearIntervalSpy).toHaveBeenCalled()
+    history.pushState({}, '', '/')
+    vi.useRealTimers()
   })
 
-  it('HIGH-2: destroy() durante aguardarVideoNetflix pendente nao reinstala handlers', async () => {
-    // Cenario: aguardarVideoNetflix leva tempo (video nao disponivel imediatamente)
-    // destroy() e chamado antes da promise resolver; o adapter nao deve tentar
-    // registrar handlers num elemento destruido.
+  it('destroy() durante aguardarVideoDisney pendente nao reinstala handlers', async () => {
     const video = criarMockVideo()
 
-    // MutationObserver que nunca dispara (video "ainda nao apareceu")
     let observerCallback: MutationCallback | null = null
     class MockMutationObserver {
       observe = vi.fn()
@@ -571,12 +666,9 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
-    // Primeira chamada: retorna o video (para o createNetflixAdapter inicial)
-    // Chamadas subsequentes (em onSpaNavegacao): retornam null (video sumiu)
     let queryCalls = 0
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
       queryCalls++
-      if (queryCalls <= 2 && sel === '.watch-video--player-view video') return video as unknown as Element
       if (queryCalls <= 2 && sel === 'video') return video as unknown as Element
       return null
     })
@@ -585,23 +677,24 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
       return [] as unknown as NodeListOf<Element>
     })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter).not.toBeNull()
 
     // Dispara navegacao SPA (onSpaNavegacao fica esperando o video aparecer)
+    history.pushState({}, '', '/video/test')
     window.dispatchEvent(new PopStateEvent('popstate'))
 
-    // Destroy imediato (antes de aguardarVideoNetflix resolver)
+    // Destroy imediato (antes de aguardarVideoDisney resolver)
     adapter?.destroy()
+    history.pushState({}, '', '/')
 
     // Dispara o MutationObserver mockado - simula video aparecendo apos destroy
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cbCapturado = observerCallback as ((...args: any[]) => void) | null
     if (cbCapturado) {
-      // Faz querySelector retornar o video agora
       vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-        if (sel === '.watch-video--player-view video') return video as unknown as Element
+        if (sel === 'video') return video as unknown as Element
         return null
       })
       cbCapturado([], null)
@@ -611,11 +704,11 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     await new Promise((r) => setTimeout(r, 20))
 
     // Apos destroy + resolucao tardia, removeEventListener deve ter sido chamado
-    // e nao deve ter ocorrido erro ou reinstalacao de handlers
+    // e nenhum erro deve ter ocorrido (adapter nao reinstalou handlers)
     expect(video.removeEventListener).toHaveBeenCalled()
   })
 
-  it('HIGH-2: navegacoes SPA concorrentes - apenas a ultima e aplicada', async () => {
+  it('navegacoes SPA concorrentes: apenas a ultima e aplicada', async () => {
     const videoOriginal = criarMockVideo()
     const videoFinal = criarMockVideo()
 
@@ -630,7 +723,6 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return videoAtivo as unknown as Element
       if (sel === 'video') return videoAtivo as unknown as Element
       return null
     })
@@ -639,15 +731,14 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
       return [] as unknown as NodeListOf<Element>
     })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     expect(adapter).not.toBeNull()
 
     const playHandler = vi.fn()
     adapter?.on('play', playHandler)
 
-    // Navega para /watch/ para que spaPopstateHandler nao filtre os eventos
-    history.pushState({}, '', '/watch/11111')
+    history.pushState({}, '', '/video/11111')
 
     // Dispara duas navegacoes SPA em rapida sucessao (concorrentes)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -665,76 +756,25 @@ describe('SPA: re-resolucao de video ao trocar de episodio', () => {
     adapter?.destroy()
     history.pushState({}, '', '/')
   })
-
-  it('HIGH-2: polling de location.href detecta mudanca de URL (pushState)', async () => {
-    const video = criarMockVideo()
-
-    class MockMutationObserver {
-      observe = vi.fn()
-      disconnect = vi.fn()
-      constructor(public callback: MutationCallback) {}
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(globalThis as any).MutationObserver = MockMutationObserver
-
-    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
-      if (sel === 'video') return video as unknown as Element
-      return null
-    })
-    vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearInterval', 'clearTimeout'] })
-
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
-    expect(adapter).not.toBeNull()
-
-    // Espiona onSpaNavegacao indiretamente via removeEventListener do video
-    // (removerHandlersNativos e chamado na navegacao bem-sucedida apos M2 fix)
-    const removeListenerSpy = vi.spyOn(video, 'removeEventListener')
-
-    // Simula pushState usando history.pushState (suportado pelo jsdom).
-    // history.pushState atualiza location.href de forma nativa, sem precisar de
-    // Object.defineProperty que o jsdom bloqueia (location.href nao e configuravel).
-    history.pushState({}, '', '/watch/99999999')
-
-    // Avanca exatamente 1 ciclo de polling (800ms) + delay de renavigate (150ms) + margem
-    // Nao usar runAllTimersAsync() pois o setInterval de polling eh infinito
-    vi.advanceTimersByTime(951)
-
-    // Aguarda resolucao das promises internas (microtasks e macrotasks do renavigate)
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    // Verifica que o polling reagiu a mudanca de URL
-    // (handlers do video antigo foram removidos como parte da re-ligacao)
-    expect(removeListenerSpy).toHaveBeenCalled()
-
-    adapter?.destroy()
-    // Restaura a URL original para nao contaminar outros testes
-    history.pushState({}, '', '/')
-    vi.useRealTimers()
-  })
 })
 
 // ---------------------------------------------------------------------------
 // Testes de deteccao de anuncio via MutationObserver
 // ---------------------------------------------------------------------------
 
-describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
+describe('Anuncio Disney+: emissao de ad-start/ad-end via MutationObserver', () => {
   let MutationObserverOriginal: typeof MutationObserver
 
   beforeEach(() => {
     MutationObserverOriginal = globalThis.MutationObserver
+    // MEDIUM-2: gate de path requer rota de player para que o adapter seja criado
+    history.pushState({}, '', '/video/test-id')
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
     vi.resetModules()
-    // CR-MINOR-2: restaura MutationObserver global, timers e URL
+    // CR-MINOR-2: restaura MutationObserver global e timers
     globalThis.MutationObserver = MutationObserverOriginal
     vi.useRealTimers()
     history.pushState({}, '', '/')
@@ -744,7 +784,6 @@ describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
     const video = criarMockVideo()
     let adVisivel = false
 
-    // Captura callback do MutationObserver
     let observerCallback: MutationCallback | null = null
     class MockMutationObserver {
       observe = vi.fn()
@@ -757,17 +796,16 @@ describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
       if (sel === 'video') return video as unknown as Element
-      // Seletor de ad-ui retorna elemento visivel somente quando anuncio esta ativo
+      // custom element de anuncio retorna elemento somente quando anuncio esta visivel
       // CR-MAJOR: usa criarElementoAdVisivel() para passar pelo filtro elementoVisivel()
-      if (sel === '[data-uia="ad-ui"]' && adVisivel) return criarElementoAdVisivel()
+      if (sel === 'ad-badge-overlay' && adVisivel) return criarElementoAdVisivel()
       return null
     })
     vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const adStartHandler = vi.fn()
     adapter?.on('ad-start', adStartHandler)
@@ -796,16 +834,15 @@ describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
       if (sel === 'video') return video as unknown as Element
       // CR-MAJOR: usa criarElementoAdVisivel() para passar pelo filtro elementoVisivel()
-      if (sel === '[data-uia="ad-ui"]' && adVisivel) return criarElementoAdVisivel()
+      if (sel === 'ad-badge-overlay' && adVisivel) return criarElementoAdVisivel()
       return null
     })
     vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     const adEndHandler = vi.fn()
     adapter?.on('ad-end', adEndHandler)
@@ -815,6 +852,44 @@ describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
     observerCallback!([] as unknown as MutationRecord[], null as unknown as MutationObserver)
 
     expect(adEndHandler).toHaveBeenCalledOnce()
+    adapter?.destroy()
+  })
+
+  it('deteta anuncio via seletor alternativo .ad-badge', async () => {
+    const video = criarMockVideo()
+    // CR-MAJOR: elemento precisa passar pelo filtro elementoVisivel()
+    const adEl = criarElementoAdVisivel()
+
+    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
+      if (sel === 'video') return video as unknown as Element
+      if (sel === '.ad-badge') return adEl
+      return null
+    })
+    vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
+
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
+
+    expect(adapter?.isAd()).toBe(true)
+    adapter?.destroy()
+  })
+
+  it('deteta anuncio via seletor [data-testid="ad-badge"]', async () => {
+    const video = criarMockVideo()
+    // CR-MAJOR: elemento precisa passar pelo filtro elementoVisivel()
+    const adEl = criarElementoAdVisivel()
+
+    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
+      if (sel === 'video') return video as unknown as Element
+      if (sel === '[data-testid="ad-badge"]') return adEl
+      return null
+    })
+    vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
+
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
+
+    expect(adapter?.isAd()).toBe(true)
     adapter?.destroy()
   })
 
@@ -831,97 +906,108 @@ describe('Anuncio: emissao de ad-start/ad-end via MutationObserver', () => {
     ;(globalThis as any).MutationObserver = MockMutationObserver
 
     vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return video as unknown as Element
       if (sel === 'video') return video as unknown as Element
       return null
     })
     vi.spyOn(document, 'querySelectorAll').mockReturnValue([video] as unknown as NodeListOf<Element>)
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
     adapter?.destroy()
 
-    // O MutationObserver de anuncio deve ter sido desconectado
     expect(disconnectSpy).toHaveBeenCalled()
   })
 })
 
 // ---------------------------------------------------------------------------
-// Testes de selecao de video (heuristica)
+// Testes de selecao de video (heuristica Disney+)
 // ---------------------------------------------------------------------------
 
-describe('Heuristica de selecao do video principal', () => {
+describe('Heuristica de selecao do video principal (Disney+)', () => {
+  let MutationObserverOriginalHeuristica: typeof MutationObserver
+
+  beforeEach(() => {
+    MutationObserverOriginalHeuristica = globalThis.MutationObserver
+    // MEDIUM-2: selecionarVideoDisney() requer path de player para nao retornar null
+    history.pushState({}, '', '/video/test-id')
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
     vi.resetModules()
+    // CR-MINOR-2: restaura MutationObserver, timers e URL
+    globalThis.MutationObserver = MutationObserverOriginalHeuristica
+    vi.useRealTimers()
+    history.pushState({}, '', '/')
   })
 
-  it('prefere o video do container .watch-video--player-view quando disponivel', async () => {
-    const videoPlayer = criarMockVideo({ currentTime: 100 })
-    const videoTrailer = criarMockVideo({ currentTime: 5 })
+  it('prefere video visivel (checkVisibility=true) sobre invisivel', async () => {
+    // Disney+ tem varios <video> na pagina; checkVisibility e o primeiro filtro
+    const videoInvisivel = criarMockVideo({ currentTime: 5 })
+    ;(videoInvisivel as unknown as { checkVisibility: () => boolean }).checkVisibility = vi.fn(() => false)
+    vi.spyOn(videoInvisivel, 'getBoundingClientRect').mockReturnValue({
+      width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON: vi.fn(),
+    } as DOMRect)
 
-    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      if (sel === '.watch-video--player-view video') return videoPlayer as unknown as Element
-      if (sel === 'video') return videoTrailer as unknown as Element
-      return null
+    const videoPrincipal = criarMockVideo({ currentTime: 100 })
+    ;(videoPrincipal as unknown as { checkVisibility: () => boolean }).checkVisibility = vi.fn(() => true)
+    vi.spyOn(videoPrincipal, 'getBoundingClientRect').mockReturnValue({
+      width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON: vi.fn(),
+    } as DOMRect)
+
+    vi.spyOn(document, 'querySelector').mockReturnValue(null)
+    vi.spyOn(document, 'querySelectorAll').mockImplementation((sel: string) => {
+      if (sel === 'video') return [videoInvisivel, videoPrincipal] as unknown as NodeListOf<Element>
+      return [] as unknown as NodeListOf<Element>
     })
-    vi.spyOn(document, 'querySelectorAll').mockReturnValue(
-      [videoPlayer, videoTrailer] as unknown as NodeListOf<Element>
-    )
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
-    // O adapter deve ter conectado ao video do player, nao ao trailer
+    // O adapter deve ter conectado ao video visivel
     expect(adapter?.getCurrentTime()).toBe(100)
     adapter?.destroy()
   })
 
-  it('escolhe o video de maior duracao quando seletor primario falha', async () => {
-    // Simula dois videos: conteudo principal (longo) e trailer (curto)
+  it('escolhe o video de maior duracao entre os visiveis', async () => {
     const videoConteudo = criarMockVideo()
     Object.defineProperty(videoConteudo, 'duration', { value: 5400, configurable: true })
     Object.defineProperty(videoConteudo, 'readyState', { value: 4, configurable: true })
     videoConteudo.currentTime = 300
+    vi.spyOn(videoConteudo, 'getBoundingClientRect').mockReturnValue({
+      width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON: vi.fn(),
+    } as DOMRect)
 
     const videoTrailer = criarMockVideo()
     Object.defineProperty(videoTrailer, 'duration', { value: 90, configurable: true })
     Object.defineProperty(videoTrailer, 'readyState', { value: 4, configurable: true })
     videoTrailer.currentTime = 10
+    vi.spyOn(videoTrailer, 'getBoundingClientRect').mockReturnValue({
+      width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON: vi.fn(),
+    } as DOMRect)
 
-    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      // Seletor primario falha
-      if (sel === '.watch-video--player-view video') return null
-      if (sel === 'video') return videoTrailer as unknown as Element
-      return null
-    })
+    vi.spyOn(document, 'querySelector').mockReturnValue(null)
     vi.spyOn(document, 'querySelectorAll').mockImplementation((sel: string) => {
       if (sel === 'video') return [videoTrailer, videoConteudo] as unknown as NodeListOf<Element>
       return [] as unknown as NodeListOf<Element>
     })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     // Deve ter escolhido o video de maior duracao (conteudo principal)
     expect(adapter?.getCurrentTime()).toBe(300)
     adapter?.destroy()
   })
 
-  it('fallback por maior area renderizada (offsetWidth * offsetHeight) quando nenhum video tem duracao conhecida', async () => {
-    // Simula dois videos sem duracao (readyState < HAVE_METADATA):
-    // o adapter deve cair no terceiro nivel da heuristica e escolher o de maior area.
+  it('fallback por maior area renderizada quando nenhum video tem duracao conhecida', async () => {
     const videoPequeno = criarMockVideo()
     Object.defineProperty(videoPequeno, 'readyState', { value: 1, configurable: true })
     Object.defineProperty(videoPequeno, 'duration', { value: NaN, configurable: true })
     Object.defineProperty(videoPequeno, 'offsetWidth', { value: 320, configurable: true })
     Object.defineProperty(videoPequeno, 'offsetHeight', { value: 180, configurable: true })
-    // getBoundingClientRect com area menor (area = 57600px2 < VIDEO_AREA_MINIMA_PX2 de 40000?
-    // 320*180=57600 > 40000, entao ainda passa o filtro de area minima)
     vi.spyOn(videoPequeno, 'getBoundingClientRect').mockReturnValue({
-      width: 320, height: 180,
-      top: 0, left: 0, right: 320, bottom: 180,
-      x: 0, y: 0, toJSON: vi.fn(),
+      width: 320, height: 180, top: 0, left: 0, right: 320, bottom: 180, x: 0, y: 0, toJSON: vi.fn(),
     } as DOMRect)
     videoPequeno.currentTime = 5
 
@@ -931,24 +1017,18 @@ describe('Heuristica de selecao do video principal', () => {
     Object.defineProperty(videoGrande, 'offsetWidth', { value: 1280, configurable: true })
     Object.defineProperty(videoGrande, 'offsetHeight', { value: 720, configurable: true })
     vi.spyOn(videoGrande, 'getBoundingClientRect').mockReturnValue({
-      width: 1280, height: 720,
-      top: 0, left: 0, right: 1280, bottom: 720,
-      x: 0, y: 0, toJSON: vi.fn(),
+      width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON: vi.fn(),
     } as DOMRect)
     videoGrande.currentTime = 42
 
-    vi.spyOn(document, 'querySelector').mockImplementation((sel: string) => {
-      // Seletor primario falha
-      if (sel === '.watch-video--player-view video') return null
-      return null
-    })
+    vi.spyOn(document, 'querySelector').mockReturnValue(null)
     vi.spyOn(document, 'querySelectorAll').mockImplementation((sel: string) => {
       if (sel === 'video') return [videoPequeno, videoGrande] as unknown as NodeListOf<Element>
       return [] as unknown as NodeListOf<Element>
     })
 
-    const { createNetflixAdapter } = await import('../../src/adapters/netflix')
-    const adapter = await createNetflixAdapter()
+    const { createDisneyAdapter } = await import('../../src/adapters/disney')
+    const adapter = await createDisneyAdapter()
 
     // Deve ter escolhido o video de maior area renderizada
     expect(adapter?.getCurrentTime()).toBe(42)
