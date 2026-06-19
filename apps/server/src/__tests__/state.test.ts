@@ -68,6 +68,19 @@ describe('computeCurrentPosition', () => {
     const state: RoomState = { ...BASE_STATE, playing: false, positionSecs: 99 }
     expect(computeCurrentPosition(state)).toBe(99)
   })
+
+  it('retorna positionSecs sem avanco quando relogio retrocede (serverNow < lastEventAt)', () => {
+    const state: RoomState = {
+      ...BASE_STATE,
+      playing: true,
+      positionSecs: 30,
+      lastEventAt: 5000,
+      playbackRate: 1.0,
+    }
+    // serverNow anterior ao lastEventAt: elapsed deve ser tratado como 0
+    const result = computeCurrentPosition(state, 3000)
+    expect(result).toBe(30)
+  })
 })
 
 // -----------------------------------------------------------------------

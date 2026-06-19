@@ -48,7 +48,6 @@ export function RoomPlayer({ roomState, onAdapterReady }: RoomPlayerProps) {
       adapterRef.current?.destroy()
       adapterRef.current = null
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomState.mediaUrl, roomState.mediaType])
 
   if (roomState.mediaType === 'youtube') {

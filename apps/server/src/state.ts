@@ -11,7 +11,7 @@ export function computeCurrentPosition(state: RoomState, serverNow?: number): nu
   }
 
   const now = serverNow ?? Date.now()
-  const elapsedMs = now - state.lastEventAt
+  const elapsedMs = Math.max(0, now - state.lastEventAt)
   const elapsedSecs = (elapsedMs / 1000) * state.playbackRate
 
   return state.positionSecs + elapsedSecs
