@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid'
 import type {
   ClientEvent,
   RoomStateEvent,
+  WelcomeEvent,
 } from '@openparty/protocol'
 import {
   isClientEvent,
@@ -16,11 +17,18 @@ import {
   isReactionClientEvent,
   isBufferingStartEvent,
   isBufferingEndEvent,
+  isSetHostLockEvent,
 } from '@openparty/protocol'
 import { createRoom, joinRoom, leaveRoom, getRoom, broadcast } from './rooms'
 import { handleClockPing } from './handlers/clock'
 import { handleSync } from './handlers/sync'
 import { handleChat, handleReaction } from './handlers/chat'
+import { handleHostLock } from './handlers/host-lock'
+
+// Comprimento maximo permitido para displayName e avatar no handshake
+const DISPLAY_NAME_MAX = 64
+const AVATAR_MAX = 16
+const MEDIA_URL_MAX = 2048
 
 function detectMediaType(url: string): 'youtube' | 'mp4' {
   if (
@@ -33,24 +41,48 @@ function detectMediaType(url: string): 'youtube' | 'mp4' {
   return 'mp4'
 }
 
+/**
+ * Valida a mediaUrl recebida em POST /rooms.
+ * Exige string nao vazia, length <= MEDIA_URL_MAX, e protocolo http ou https.
+ */
+function isValidMediaUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MEDIA_URL_MAX) {
+    return false
+  }
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export function createApp() {
   const app = new Hono()
 
-  app.use('*', cors())
+  // CORS configuravel via variavel de ambiente.
+  // Em self-host ou desenvolvimento: ALLOWED_ORIGIN nao definida => '*' (permissivo).
+  // Em producao: definir ALLOWED_ORIGIN com a origem exata do frontend.
+  app.use('*', cors({ origin: process.env['ALLOWED_ORIGIN'] ?? '*' }))
 
   app.post('/rooms', async (c) => {
     const body = await c.req.json().catch(() => null)
-    if (!body || typeof body.mediaUrl !== 'string' || !body.mediaUrl) {
-      return c.json({ error: 'mediaUrl obrigatorio' }, 400)
+    if (!body || !isValidMediaUrl(body.mediaUrl)) {
+      return c.json({ error: 'mediaUrl invalida: deve ser string http/https com ate 2048 caracteres' }, 400)
     }
 
-    const mediaType = detectMediaType(body.mediaUrl)
-    const roomId = createRoom(body.mediaUrl, mediaType)
+    const mediaType = detectMediaType(body.mediaUrl as string)
+    const roomId = createRoom(body.mediaUrl as string, mediaType)
 
     const baseUrl = new URL(c.req.url)
     const url = `${baseUrl.protocol}//${baseUrl.host}/room/${roomId}`
 
     return c.json({ roomId, url }, 201)
+  })
+
+  // Rota de health check - usada pelo docker-compose e por load balancers
+  app.get('/health', (c) => {
+    return c.json({ status: 'ok' })
   })
 
   // Rota WS: upgrade tratado pelo runtime Bun fora do Hono
@@ -90,6 +122,10 @@ if (import.meta.main) {
       return app.fetch(req)
     },
     websocket: {
+      // Limita o tamanho maximo de cada frame recebido a 64KB para
+      // evitar ataques de payload gigante via WebSocket
+      maxPayload: 65536,
+
       open(ws) {
         // Handshake: aguarda primeiro frame com displayName e avatar
         ws.data._handshakeDone = false
@@ -108,8 +144,29 @@ if (import.meta.main) {
 
         // Handshake inicial
         if (!ws.data._handshakeDone) {
-          const h = parsed as { displayName?: string; avatar?: string }
-          if (!h.displayName) return
+          const h = parsed as Record<string, unknown>
+
+          // displayName: obrigatorio, string, 1..64 chars
+          if (
+            typeof h['displayName'] !== 'string' ||
+            h['displayName'].length < 1 ||
+            h['displayName'].length > DISPLAY_NAME_MAX
+          ) {
+            ws.close(4000, 'handshake invalido')
+            return
+          }
+
+          // avatar: opcional, mas se fornecido deve ser string com ate 16 chars
+          const rawAvatar = h['avatar']
+          if (rawAvatar !== undefined && rawAvatar !== null) {
+            if (typeof rawAvatar !== 'string' || rawAvatar.length > AVATAR_MAX) {
+              ws.close(4000, 'handshake invalido')
+              return
+            }
+          }
+
+          const displayName = h['displayName'] as string
+          const avatar = typeof rawAvatar === 'string' ? rawAvatar : '🎬'
 
           const userId = nanoid()
           ws.data._userId = userId
@@ -118,8 +175,8 @@ if (import.meta.main) {
           try {
             joinRoom(roomId, {
               userId,
-              displayName: h.displayName,
-              avatar: h.avatar ?? '🎬',
+              displayName,
+              avatar,
               connectedAt: Date.now(),
               send: (event) => {
                 try { ws.send(JSON.stringify(event)) } catch { /* ws fechado */ }
@@ -130,6 +187,10 @@ if (import.meta.main) {
             ws.close(4004, 'Sala nao encontrada')
             return
           }
+
+          // Informa ao cliente o seu proprio userId logo apos o handshake
+          const welcomeEvent: WelcomeEvent = { type: 'welcome', userId }
+          ws.send(JSON.stringify(welcomeEvent))
 
           const room = getRoom(roomId)
           if (!room) return
@@ -150,8 +211,8 @@ if (import.meta.main) {
           broadcast(roomId, {
             type: 'join',
             userId,
-            displayName: h.displayName,
-            avatar: h.avatar ?? '🎬',
+            displayName,
+            avatar,
           }, userId)
 
           return
@@ -171,6 +232,8 @@ if (import.meta.main) {
           handleChat(event, roomId, userId)
         } else if (isReactionClientEvent(event)) {
           handleReaction(event, roomId, userId)
+        } else if (isSetHostLockEvent(event)) {
+          handleHostLock(event, roomId, userId)
         } else if (isBufferingStartEvent(event) || isBufferingEndEvent(event)) {
           // fase 2: implementar buffering wait-gate
         }

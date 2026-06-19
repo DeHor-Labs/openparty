@@ -137,6 +137,175 @@ describe('handleChat', () => {
 })
 
 // ---------------------------------------------------------------------------
+// GET /health
+// ---------------------------------------------------------------------------
+
+describe('GET /health', () => {
+  it('responde 200 com status ok', async () => {
+    const app = await getApp()
+    const res = await app.request('/health', { method: 'GET' })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { status: string }
+    expect(body.status).toBe('ok')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /rooms - validacao de mediaUrl
+// ---------------------------------------------------------------------------
+
+describe('POST /rooms - validacao de mediaUrl', () => {
+  it('rejeita mediaUrl vazia com 400', async () => {
+    const app = await getApp()
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: '' }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejeita mediaUrl com protocolo ftp com 400', async () => {
+    const app = await getApp()
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'ftp://example.com/video.mp4' }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejeita mediaUrl com mais de 2048 caracteres com 400', async () => {
+    const app = await getApp()
+    const longUrl = 'https://example.com/' + 'a'.repeat(2048)
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: longUrl }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejeita mediaUrl invalida (sem protocolo) com 400', async () => {
+    const app = await getApp()
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'nao-e-uma-url' }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('aceita mediaUrl https valida', async () => {
+    const app = await getApp()
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'https://cdn.example.com/filme.mp4' }),
+    })
+    expect(res.status).toBe(201)
+  })
+
+  it('aceita mediaUrl http valida', async () => {
+    const app = await getApp()
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'http://cdn.example.com/filme.mp4' }),
+    })
+    expect(res.status).toBe(201)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// handleHostLock
+// ---------------------------------------------------------------------------
+
+describe('handleHostLock', () => {
+  it('host pode ativar host-lock e broadcast e emitido', async () => {
+    const { handleHostLock } = await import('../handlers/host-lock')
+    const { createRoom, getRoom } = await import('../rooms')
+
+    const roomId = createRoom('https://example.com/video.mp4', 'mp4')
+    const room = getRoom(roomId)!
+    const hostId = room.state.hostId
+    const mockSend = vi.fn()
+
+    room.clients.set(hostId, {
+      userId: hostId,
+      displayName: 'Host',
+      avatar: '🎬',
+      connectedAt: Date.now(),
+      send: mockSend,
+    })
+
+    handleHostLock({ type: 'set-host-lock', locked: true }, roomId, hostId)
+
+    expect(getRoom(roomId)!.state.hostLock).toBe(true)
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'host-lock', locked: true })
+    )
+  })
+
+  it('nao-host nao pode alterar host-lock', async () => {
+    const { handleHostLock } = await import('../handlers/host-lock')
+    const { createRoom, getRoom } = await import('../rooms')
+
+    const roomId = createRoom('https://example.com/video.mp4', 'mp4')
+    const room = getRoom(roomId)!
+    const hostId = room.state.hostId
+    const visitanteId = 'visitante-123'
+    const mockSend = vi.fn()
+
+    room.clients.set(hostId, {
+      userId: hostId,
+      displayName: 'Host',
+      avatar: '🎬',
+      connectedAt: Date.now(),
+      send: vi.fn(),
+    })
+    room.clients.set(visitanteId, {
+      userId: visitanteId,
+      displayName: 'Visitante',
+      avatar: '👤',
+      connectedAt: Date.now(),
+      send: mockSend,
+    })
+
+    handleHostLock({ type: 'set-host-lock', locked: true }, roomId, visitanteId)
+
+    expect(getRoom(roomId)!.state.hostLock).toBe(false)
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('host pode desativar host-lock', async () => {
+    const { handleHostLock } = await import('../handlers/host-lock')
+    const { createRoom, getRoom, updateRoomState } = await import('../rooms')
+
+    const roomId = createRoom('https://example.com/video.mp4', 'mp4')
+    const room = getRoom(roomId)!
+    const hostId = room.state.hostId
+    updateRoomState(roomId, { ...room.state, hostLock: true })
+
+    const mockSend = vi.fn()
+    room.clients.set(hostId, {
+      userId: hostId,
+      displayName: 'Host',
+      avatar: '🎬',
+      connectedAt: Date.now(),
+      send: mockSend,
+    })
+
+    handleHostLock({ type: 'set-host-lock', locked: false }, roomId, hostId)
+
+    expect(getRoom(roomId)!.state.hostLock).toBe(false)
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'host-lock', locked: false })
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Regressao: joinRoom com roomId invalido nao derruba o processo
 // ---------------------------------------------------------------------------
 
