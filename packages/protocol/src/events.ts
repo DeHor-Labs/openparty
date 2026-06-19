@@ -64,6 +64,12 @@ export interface ReactionClientEvent {
   emoji: string
 }
 
+/** Cliente solicita ativar ou desativar o host-lock da sala */
+export interface SetHostLockClientEvent {
+  type: 'set-host-lock'
+  locked: boolean
+}
+
 export type ClientEvent =
   | PlayClientEvent
   | PauseClientEvent
@@ -73,10 +79,20 @@ export type ClientEvent =
   | BufferingEndEvent
   | ChatClientEvent
   | ReactionClientEvent
+  | SetHostLockClientEvent
 
 // ---------------------------------------------------------------------------
 // Eventos: Servidor -> Clientes
 // ---------------------------------------------------------------------------
+
+/**
+ * Enviado ao cliente logo apos o handshake para informar seu userId.
+ * Permite que o cliente saiba quem ele mesmo e e compare com hostId.
+ */
+export interface WelcomeEvent {
+  type: 'welcome'
+  userId: string
+}
 
 /** Enviado ao entrante para sincronizar estado completo da sala */
 export interface RoomStateEvent extends RoomState {
@@ -130,6 +146,12 @@ export interface HostChangeEvent {
   hostId: string
 }
 
+/** Notifica todos os clientes da sala sobre mudanca no estado do host-lock */
+export interface HostLockEvent {
+  type: 'host-lock'
+  locked: boolean
+}
+
 export interface ChatServerEvent {
   type: 'chat'
   userId: string
@@ -146,6 +168,7 @@ export interface ReactionServerEvent {
 }
 
 export type ServerEvent =
+  | WelcomeEvent
   | RoomStateEvent
   | PlayServerEvent
   | PauseServerEvent
@@ -154,6 +177,7 @@ export type ServerEvent =
   | JoinEvent
   | LeaveEvent
   | HostChangeEvent
+  | HostLockEvent
   | ChatServerEvent
   | ReactionServerEvent
 
@@ -168,16 +192,83 @@ export interface PresencePeer {
 }
 
 // ---------------------------------------------------------------------------
+// Constantes de validacao
+// ---------------------------------------------------------------------------
+
+/** Duracao maxima de video suportada (24 horas em segundos) */
+export const MAX_TIME_SECS = 86400
+
+/** Comprimento maximo do texto de chat */
+export const CHAT_MAX_LENGTH = 500
+
+/** Comprimento maximo do emoji de reacao */
+export const EMOJI_MAX_LENGTH = 16
+
+// ---------------------------------------------------------------------------
+// Helpers internos de validacao de payload
+// ---------------------------------------------------------------------------
+
+/** Verifica se `n` e um number finito >= 0 e <= MAX_TIME_SECS */
+function isValidTimeSecs(n: unknown): n is number {
+  return (
+    typeof n === 'number' &&
+    Number.isFinite(n) &&
+    n >= 0 &&
+    n <= MAX_TIME_SECS
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Type guards (usados pelo servidor para validar mensagens recebidas)
 // ---------------------------------------------------------------------------
 
+/**
+ * Valida que `raw` e um ClientEvent bem-formado, incluindo os campos
+ * obrigatorios de cada subtipo. Payload invalido retorna false.
+ */
 export function isClientEvent(raw: unknown): raw is ClientEvent {
-  return (
-    typeof raw === 'object' &&
-    raw !== null &&
-    'type' in raw &&
-    typeof (raw as Record<string, unknown>).type === 'string'
-  )
+  if (typeof raw !== 'object' || raw === null) return false
+
+  const obj = raw as Record<string, unknown>
+  if (typeof obj['type'] !== 'string') return false
+
+  switch (obj['type']) {
+    case 'play':
+    case 'pause':
+    case 'seek':
+      return isValidTimeSecs(obj['time'])
+
+    case 'clock-ping':
+      return typeof obj['t1'] === 'number' && Number.isFinite(obj['t1'])
+
+    case 'chat': {
+      const text = obj['text']
+      return (
+        typeof text === 'string' &&
+        text.length >= 1 &&
+        text.length <= CHAT_MAX_LENGTH
+      )
+    }
+
+    case 'reaction': {
+      const emoji = obj['emoji']
+      return (
+        typeof emoji === 'string' &&
+        emoji.length >= 1 &&
+        emoji.length <= EMOJI_MAX_LENGTH
+      )
+    }
+
+    case 'set-host-lock':
+      return typeof obj['locked'] === 'boolean'
+
+    case 'buffering-start':
+    case 'buffering-end':
+      return true
+
+    default:
+      return false
+  }
 }
 
 export function isPlayClientEvent(e: ClientEvent): e is PlayClientEvent {
@@ -210,4 +301,8 @@ export function isBufferingStartEvent(e: ClientEvent): e is BufferingStartEvent 
 
 export function isBufferingEndEvent(e: ClientEvent): e is BufferingEndEvent {
   return e.type === 'buffering-end'
+}
+
+export function isSetHostLockEvent(e: ClientEvent): e is SetHostLockClientEvent {
+  return e.type === 'set-host-lock'
 }
