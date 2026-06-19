@@ -1,21 +1,17 @@
 // apps/web/src/App.tsx
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Home } from './components/Home'
+import { RoomPage } from './pages/RoomPage'
 import { ThemeProvider } from './lib/ThemeContext'
-import { Suspense, lazy } from 'react'
 
-const Home = lazy(() => import('./components/Home'))
-const RoomPage = lazy(() => import('./components/room/RoomPage'))
-
-export function App() {
+export function App(): JSX.Element {
   return (
     <ThemeProvider>
       <BrowserRouter>
-        <Suspense fallback={<div className="p-8 text-center">Carregando...</div>}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/room/:roomId" element={<RoomPage />} />
-          </Routes>
-        </Suspense>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/room/:roomId" element={<RoomPage />} />
+        </Routes>
       </BrowserRouter>
     </ThemeProvider>
   )
