@@ -124,7 +124,7 @@ if (import.meta.main) {
     websocket: {
       // Limita o tamanho maximo de cada frame recebido a 64KB para
       // evitar ataques de payload gigante via WebSocket
-      maxPayload: 65536,
+      maxPayloadLength: 65536,
 
       open(ws) {
         // Handshake: aguarda primeiro frame com displayName e avatar
