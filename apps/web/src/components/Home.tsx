@@ -4,7 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
 
 const AVATAR_OPTIONS = ['🎬', '🍿', '🎮', '🎵', '🦊', '🐻', '🐼', '🦁']
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3000'
+
+// Em modo single-origin (servidor servindo o web estatico), nao definir
+// VITE_SERVER_URL no build - o fetch vai para o mesmo host/porta automaticamente.
+// Em desenvolvimento local (Vite dev server separado), VITE_SERVER_URL aponta
+// para http://localhost:3000 so para evitar CORS durante o dev.
+const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? ''
 
 export function Home() {
   const navigate = useNavigate()

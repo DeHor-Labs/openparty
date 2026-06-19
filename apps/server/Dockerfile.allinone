@@ -1,0 +1,81 @@
+# apps/server/Dockerfile.allinone
+#
+# Imagem de producao single-origin: o servidor Bun serve a API REST,
+# os WebSockets e o web estatico (build do Vite) na mesma porta 3000.
+# Isso elimina a necessidade de configurar CORS entre frontends e backend
+# quando implantado em openparty.dehor.com.br.
+#
+# Uso:
+#   docker build -f apps/server/Dockerfile.allinone -t openparty:allinone .
+#   docker run -p 3000:3000 openparty:allinone
+
+# ---------------------------------------------------------------------------
+# Stage 1 - deps: instala dependencias do monorepo
+# ---------------------------------------------------------------------------
+FROM oven/bun:1-alpine AS deps
+
+# pnpm e necessario para gerenciar o workspace turbo
+RUN npm install -g pnpm
+
+WORKDIR /app
+
+# Copiar apenas manifests para aproveitar cache de camadas do Docker
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/protocol/package.json ./packages/protocol/
+COPY packages/ui/package.json ./packages/ui/
+COPY apps/server/package.json ./apps/server/
+COPY apps/web/package.json ./apps/web/
+
+# Instala dependencias de todos os pacotes necessarios para o build completo
+RUN pnpm install --frozen-lockfile
+
+# ---------------------------------------------------------------------------
+# Stage 2 - build: compila o protocolo, o web (Vite) e o servidor (tsc)
+# ---------------------------------------------------------------------------
+FROM deps AS builder
+
+# Copiar fontes de todos os pacotes
+COPY tsconfig.base.json ./
+COPY packages/protocol ./packages/protocol
+COPY packages/ui ./packages/ui
+COPY apps/web ./apps/web
+COPY apps/server ./apps/server
+
+# 1. Compila o pacote de protocolo compartilhado
+RUN pnpm --filter @openparty/protocol build
+
+# 2. Compila o frontend com Vite - sem VITE_SERVER_URL para single-origin:
+#    o cliente usara window.location.origin como base, sem necessidade de CORS.
+RUN pnpm --filter @openparty/web build
+
+# 3. Compila o servidor TypeScript
+RUN pnpm --filter @openparty/server build
+
+# ---------------------------------------------------------------------------
+# Stage 3 - runner: imagem final minima com Bun + artefatos de producao
+# ---------------------------------------------------------------------------
+FROM oven/bun:1-alpine AS runner
+
+WORKDIR /app
+
+# Artefatos do protocolo (dependencia de runtime do servidor)
+COPY --from=builder /app/packages/protocol/dist ./packages/protocol/dist
+COPY --from=builder /app/packages/protocol/package.json ./packages/protocol/package.json
+
+# Artefatos do servidor compilado
+COPY --from=builder /app/apps/server/dist ./apps/server/dist
+COPY --from=builder /app/apps/server/package.json ./apps/server/package.json
+
+# Build do web estatico - servido diretamente pelo servidor Bun/Hono
+COPY --from=builder /app/apps/web/dist ./apps/web/dist
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# STATIC_DIR aponta para o dist do web; o servidor servira os arquivos estaticos
+# e fara o fallback SPA (GET /* -> index.html) para o react-router funcionar.
+ENV STATIC_DIR=apps/web/dist
+
+EXPOSE 3000
+
+CMD ["bun", "run", "apps/server/dist/index.js"]
