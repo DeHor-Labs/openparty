@@ -1,6 +1,8 @@
 # apps/server/Dockerfile
-FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Stage de build: oven/bun inclui Node.js e npm; adicionamos pnpm para workspaces
+FROM oven/bun:1-alpine AS base
+
+RUN npm install -g pnpm
 
 WORKDIR /app
 
@@ -20,26 +22,19 @@ COPY tsconfig.base.json ./
 RUN pnpm --filter @openparty/protocol build
 RUN pnpm --filter @openparty/server build
 
-# Imagem de producao
-FROM node:22-alpine AS runner
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Imagem de producao: apenas Bun para rodar o servidor compilado
+FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
-COPY --from=base /app/package.json ./
-COPY --from=base /app/pnpm-workspace.yaml ./
-COPY --from=base /app/pnpm-lock.yaml ./
-COPY --from=base /app/packages/protocol/package.json ./packages/protocol/
-COPY --from=base /app/apps/server/package.json ./apps/server/
-
-RUN pnpm install --frozen-lockfile --prod --filter @openparty/server... --filter @openparty/protocol
-
 COPY --from=base /app/packages/protocol/dist ./packages/protocol/dist
 COPY --from=base /app/apps/server/dist ./apps/server/dist
+COPY --from=base /app/apps/server/package.json ./apps/server/package.json
+COPY --from=base /app/packages/protocol/package.json ./packages/protocol/package.json
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["node", "apps/server/dist/index.js"]
+CMD ["bun", "run", "apps/server/dist/index.js"]
