@@ -1,0 +1,31 @@
+/* apps/web/src/index.css */
+@import "tailwindcss";
+
+:root {
+  --color-surface: oklch(98% 0 0);
+  --color-text: oklch(18% 0 0);
+  --color-accent: oklch(68% 0.21 250);
+  --color-muted: oklch(45% 0 0);
+
+  --text-base: clamp(1rem, 0.92rem + 0.4vw, 1.125rem);
+  --space-section: clamp(2rem, 1rem + 3vw, 5rem);
+
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark {
+  --color-surface: oklch(12% 0 0);
+  --color-text: oklch(95% 0 0);
+  --color-muted: oklch(60% 0 0);
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  transition: background-color var(--duration-normal) var(--ease-out-expo),
+              color var(--duration-normal) var(--ease-out-expo);
+}
