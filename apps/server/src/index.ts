@@ -115,15 +115,21 @@ if (import.meta.main) {
           ws.data._userId = userId
           ws.data._handshakeDone = true
 
-          joinRoom(roomId, {
-            userId,
-            displayName: h.displayName,
-            avatar: h.avatar ?? '🎬',
-            connectedAt: Date.now(),
-            send: (event) => {
-              try { ws.send(JSON.stringify(event)) } catch { /* ws fechado */ }
-            },
-          })
+          try {
+            joinRoom(roomId, {
+              userId,
+              displayName: h.displayName,
+              avatar: h.avatar ?? '🎬',
+              connectedAt: Date.now(),
+              send: (event) => {
+                try { ws.send(JSON.stringify(event)) } catch { /* ws fechado */ }
+              },
+            })
+          } catch (err) {
+            console.error(`[WS] joinRoom falhou para sala "${roomId}":`, err)
+            ws.close(4004, 'Sala nao encontrada')
+            return
+          }
 
           const room = getRoom(roomId)
           if (!room) return

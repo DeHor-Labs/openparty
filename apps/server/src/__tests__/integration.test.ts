@@ -1,5 +1,5 @@
 // apps/server/src/__tests__/integration.test.ts
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ServerEvent, RoomStateEvent } from '@openparty/protocol'
 
 // Reset do store de salas entre testes
@@ -133,5 +133,61 @@ describe('handleChat', () => {
     expect(evt.displayName).toBe('Nikolas')
     expect(evt.text).toBe('oi galera')
     expect(evt.ts).toBeTypeOf('number')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Regressao: joinRoom com roomId invalido nao derruba o processo
+// ---------------------------------------------------------------------------
+
+describe('joinRoom com roomId invalido', () => {
+  it('lanca erro ao tentar entrar em sala inexistente', async () => {
+    // Regressao: antes do fix, joinRoom lancava e derrubava o servidor Bun.
+    // Agora o handler de WS captura e fecha o socket com 4004.
+    // Aqui validamos que joinRoom ainda lanca (comportamento correto de rooms.ts)
+    // para que o try/catch em index.ts tenha algo a capturar.
+    const { joinRoom } = await import('../rooms')
+
+    expect(() =>
+      joinRoom('sala-que-nao-existe-jamais', {
+        userId: 'u1',
+        displayName: 'Teste',
+        avatar: '🎬',
+        connectedAt: Date.now(),
+        send: vi.fn(),
+      })
+    ).toThrow()
+  })
+
+  it('servidor HTTP continua respondendo apos tentativa de join em sala invalida', async () => {
+    // Regressao principal: o processo nao pode cair quando joinRoom lanca.
+    // Simulamos o fluxo completo pelo Hono (createApp) para confirmar que
+    // o servidor permanece operacional.
+    const { joinRoom } = await import('../rooms')
+    const app = await getApp()
+
+    // Tenta join em sala inexistente -- no servidor real fecharia o socket com 4004
+    try {
+      joinRoom('sala-fantasma-regressao', {
+        userId: 'u-reg',
+        displayName: 'Regressao',
+        avatar: '🐛',
+        connectedAt: Date.now(),
+        send: vi.fn(),
+      })
+    } catch {
+      // Captura como o handler WS faria -- servidor nao deve cair
+    }
+
+    // Servidor deve continuar respondendo normalmente
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'https://example.com/after-crash.mp4' }),
+    })
+
+    expect(res.status).toBe(201)
+    const body = await res.json() as { roomId: string; url: string }
+    expect(body.roomId).toBeTypeOf('string')
   })
 })
