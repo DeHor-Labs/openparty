@@ -9,6 +9,7 @@
 // L2: emissao de ad-start/ad-end via MutationObserver na classList do player.
 
 import type { AdapterEventName, PlaybackState, ServiceAdapter } from './interface'
+import type { StreamingServiceType } from '../lib/sync'
 
 /** Seletor do elemento video principal na pagina de watch */
 const VIDEO_SELECTOR = 'video'
@@ -245,6 +246,10 @@ export async function createYouTubeAdapter(): Promise<ServiceAdapter | null> {
       if (detectarAnuncio()) return 'ad'
       if (!videoAtual.paused) return 'playing'
       return 'paused'
+    },
+
+    getServiceType(): StreamingServiceType {
+      return 'youtube'
     },
 
     on(event: AdapterEventName, handler: () => void): void {

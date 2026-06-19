@@ -5,7 +5,8 @@
   "description": "Assista a videos em sincronia com amigos.",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": [
-    "*://*.youtube.com/*"
+    "*://*.youtube.com/*",
+    "*://*.netflix.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.ts",
@@ -13,7 +14,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/watch*"],
+      "matches": [
+        "*://*.youtube.com/watch*",
+        "*://*.netflix.com/watch*"
+      ],
       "js": ["src/content/content-main.ts"],
       "run_at": "document_idle"
     }
@@ -27,7 +31,8 @@
     {
       "resources": ["src/content/overlay/*"],
       "matches": [
-        "*://*.youtube.com/*"
+        "*://*.youtube.com/*",
+        "*://*.netflix.com/*"
       ]
     }
   ],

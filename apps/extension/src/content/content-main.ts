@@ -5,11 +5,14 @@
 
 import type { AdapterFactory, ServiceAdapter } from '../adapters/interface'
 import { createYouTubeAdapter } from '../adapters/youtube'
+import { createNetflixAdapter } from '../adapters/netflix'
 import type { ServerEvent } from '@openparty/protocol'
 import { computeClockOffset, selectBestOffset } from '../lib/clock'
 import { decideSyncAction } from '../lib/sync'
 import type { ClockSample } from '../lib/clock'
 import type { ClockPingEvent } from '@openparty/protocol'
+import { criarChatOverlay } from './overlay/chat-overlay'
+import type { ChatOverlayHandle } from './overlay/types'
 
 // ---------------------------------------------------------------------------
 // Registry: hostname -> factory do adapter
@@ -17,8 +20,9 @@ import type { ClockPingEvent } from '@openparty/protocol'
 
 const ADAPTER_REGISTRY: Record<string, AdapterFactory> = {
   'www.youtube.com': createYouTubeAdapter,
+  'www.netflix.com': createNetflixAdapter,
+  'netflix.com': createNetflixAdapter,
   // Demais adapters adicionados nas proximas sprints:
-  // 'www.netflix.com': createNetflixAdapter,
   // 'www.primevideo.com': createPrimeAdapter,
   // 'www.amazon.com': createPrimeAdapter,
   // 'www.disneyplus.com': createDisneyAdapter,
@@ -46,6 +50,7 @@ const CALIBRATION_PING_INTERVAL_MS = 200
 let port: chrome.runtime.Port | null = null
 let adapter: ServiceAdapter | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let overlay: ChatOverlayHandle | null = null
 
 /**
  * Offset estimado entre o clock do cliente e do servidor (em ms).
@@ -251,7 +256,7 @@ function aplicarComandoDoServidor(message: unknown): void {
       const posicaoEsperada = evento.positionSecs + tempoDecorrido
 
       const posicaoAtual = adapter.getCurrentTime()
-      const decisao = decideSyncAction(posicaoAtual, posicaoEsperada, 'youtube')
+      const decisao = decideSyncAction(posicaoAtual, posicaoEsperada, adapter.getServiceType())
 
       if (decisao.action === 'seek') {
         // H1: suprime todos os ecos que room-state vai disparar
@@ -270,6 +275,10 @@ function aplicarComandoDoServidor(message: unknown): void {
           console.error('[OpenParty Content] erro ao aplicar room-state pause:', err)
         })
       }
+
+      // Atualiza presenca no overlay (Sprint 2)
+      overlay?.atualizarParticipantes(evento.peers ?? [])
+      overlay?.atualizarSyncStatus('em-sync')
       break
     }
 
@@ -277,8 +286,34 @@ function aplicarComandoDoServidor(message: unknown): void {
       // Tratado pela calibracao de clock - nao e um comando de playback
       break
 
+    case 'welcome':
+      overlay?.atualizarSyncStatus('calibrando')
+      break
+
+    case 'chat':
+      overlay?.adicionarMensagem({
+        userId: evento.userId,
+        displayName: evento.displayName,
+        text: evento.text,
+        ts: evento.ts,
+      })
+      break
+
+    case 'reaction':
+      overlay?.adicionarReacao(`${evento.userId}-${evento.ts}`, evento.emoji)
+      break
+
+    case 'join':
+    case 'leave':
+      // Presenca incremental: sem lista completa, aguarda proximo room-state
+      break
+
+    case 'host-change':
+    case 'host-lock':
+      // Nao afeta o overlay
+      break
+
     default:
-      // Outros eventos (chat, reaction, join, leave, etc.) sao tratados pelo overlay (Sprint 2)
       break
   }
 }
@@ -340,6 +375,8 @@ window.addEventListener('pagehide', () => {
   port = null
   adapter?.destroy()
   adapter = null
+  overlay?.destruir()
+  overlay = null
 })
 
 // ---------------------------------------------------------------------------
@@ -372,9 +409,19 @@ async function init(): Promise<void> {
   adapter = instancia
   registrarListenersDoAdapter(adapter)
 
+  // Monta o overlay de chat/reacoes antes de conectar ao background
+  overlay = criarChatOverlay({
+    onEnviarMensagem: (text) => {
+      port?.postMessage({ type: 'chat', text } satisfies { type: 'chat'; text: string })
+    },
+    onEnviarReacao: (emoji) => {
+      port?.postMessage({ type: 'reaction', emoji } satisfies { type: 'reaction'; emoji: string })
+    },
+  })
+
   conectarAoBackground()
 
-  console.debug('[OpenParty Content] adapter pronto para', hostname)
+  console.debug('[OpenParty Content] adapter e overlay prontos para', hostname)
 }
 
 init().catch((err) => {
