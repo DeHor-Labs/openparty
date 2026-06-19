@@ -306,6 +306,113 @@ describe('handleHostLock', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Modo single-origin: servidor serve web estatico via middleware injetado
+// ---------------------------------------------------------------------------
+
+import type { Context, Next, MiddlewareHandler } from 'hono'
+
+// HTML minimo para simular o index.html do build do Vite nos testes
+const FAKE_INDEX_HTML = '<!DOCTYPE html><html><body><div id="root"></div></body></html>'
+
+/**
+ * Cria middlewares falsos de static + SPA para uso nos testes.
+ * Evita qualquer dependencia de 'hono/bun' (que exige o runtime Bun)
+ * ou de arquivos em disco: tudo em memoria.
+ */
+function makeFakeStaticOptions(): {
+  staticMiddleware: MiddlewareHandler
+  spaFallback: MiddlewareHandler
+} {
+  // Arquivos estaticos simulados em memoria
+  const fakeFiles: Record<string, string> = {
+    '/assets/app.js': '// js compilado',
+    '/': FAKE_INDEX_HTML,
+  }
+
+  // staticMiddleware: tenta servir arquivo conhecido; passa adiante se nao achar
+  const staticMiddleware: MiddlewareHandler = async (c: Context, next: Next) => {
+    const filePath = c.req.path
+    const content = fakeFiles[filePath]
+    if (content) {
+      return c.html(content)
+    }
+    return next()
+  }
+
+  // spaFallback: sempre serve o index.html (react-router cuida do roteamento)
+  const spaFallback: MiddlewareHandler = async (c: Context) => {
+    return c.html(FAKE_INDEX_HTML)
+  }
+
+  return { staticMiddleware, spaFallback }
+}
+
+describe('serve estatico (single-origin)', () => {
+  it('GET / retorna index.html (200, content-type html) com middlewares injetados', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/', { method: 'GET' })
+
+    expect(res.status).toBe(200)
+    const ct = res.headers.get('content-type') ?? ''
+    expect(ct).toMatch(/html/)
+  })
+
+  it('GET /room/qualquer retorna index.html (fallback SPA) com middlewares injetados', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/room/abc123', { method: 'GET' })
+
+    expect(res.status).toBe(200)
+    const ct = res.headers.get('content-type') ?? ''
+    expect(ct).toMatch(/html/)
+  })
+
+  it('GET /health continua retornando JSON mesmo com middlewares injetados', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/health', { method: 'GET' })
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { status: string }
+    expect(body.status).toBe('ok')
+  })
+
+  it('POST /rooms continua retornando JSON mesmo com middlewares injetados', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mediaUrl: 'https://example.com/video.mp4' }),
+    })
+
+    expect(res.status).toBe(201)
+    const body = await res.json() as { roomId: string }
+    expect(body.roomId).toBeTypeOf('string')
+  })
+
+  it('sem middlewares injetados, GET / nao serve estaticos (modo desenvolvimento)', async () => {
+    const { createApp } = await import('../index')
+    // Sem opcoes: comportamento de dev - nenhuma rota captura GET /
+    const app = createApp()
+
+    const res = await app.request('/', { method: 'GET' })
+
+    // Hono retorna 404 quando nenhuma rota corresponde
+    expect(res.status).toBe(404)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Regressao: joinRoom com roomId invalido nao derruba o processo
 // ---------------------------------------------------------------------------
 

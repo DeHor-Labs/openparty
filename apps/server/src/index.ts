@@ -1,6 +1,7 @@
 // apps/server/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { MiddlewareHandler } from 'hono'
 import { nanoid } from 'nanoid'
 import type {
   ClientEvent,
@@ -57,7 +58,19 @@ function isValidMediaUrl(value: unknown): value is string {
   }
 }
 
-export function createApp() {
+/**
+ * Opcoes de criacao do app Hono.
+ * staticMiddleware: serve arquivos do dist do Vite (JS, CSS, imagens).
+ * spaFallback: serve index.html para rotas desconhecidas (react-router).
+ * Ambos sao injetados apenas em producao (runtime Bun) para nao poluir
+ * o ambiente de testes Node/Vitest, onde Bun nao existe.
+ */
+export interface CreateAppOptions {
+  staticMiddleware?: MiddlewareHandler
+  spaFallback?: MiddlewareHandler
+}
+
+export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono()
 
   // CORS configuravel via variavel de ambiente.
@@ -90,6 +103,24 @@ export function createApp() {
     return c.text('Use WebSocket upgrade', 426)
   })
 
+  // ---------------------------------------------------------------------------
+  // Servir arquivos estaticos do web quando um middleware for injetado.
+  // Em producao (single-origin), o bloco import.meta.main instancia
+  // serveStatic de 'hono/bun' e passa via options.staticMiddleware.
+  // Em testes (Vitest/Node), nenhum middleware e passado e este bloco
+  // e ignorado, preservando o comportamento de dev.
+  // ---------------------------------------------------------------------------
+  if (options.staticMiddleware) {
+    // Arquivos estaticos (JS, CSS, imagens, favicon, etc.)
+    app.use('/*', options.staticMiddleware)
+  }
+
+  if (options.spaFallback) {
+    // Fallback SPA: qualquer rota GET nao capturada pelos handlers acima
+    // (ex: /room/abc) devolve o index.html para o react-router tratar.
+    app.get('*', options.spaFallback)
+  }
+
   return app
 }
 
@@ -105,7 +136,21 @@ interface WsData {
 
 // Servidor Bun com WebSocket
 if (import.meta.main) {
-  const app = createApp()
+  // Em producao single-origin, STATIC_DIR aponta para o dist do Vite.
+  // Importamos serveStatic de 'hono/bun' apenas aqui para nao poluir o
+  // ambiente de testes Node/Vitest com APIs exclusivas do runtime Bun.
+  const staticDir = process.env['STATIC_DIR']
+  let staticMiddleware: MiddlewareHandler | undefined
+  let spaFallback: MiddlewareHandler | undefined
+  if (staticDir) {
+    const { serveStatic } = await import('hono/bun')
+    // Serve arquivos estaticos do dist (JS, CSS, imagens, etc.)
+    staticMiddleware = serveStatic({ root: staticDir })
+    // Fallback SPA: rotas de pagina como /room/abc retornam index.html
+    spaFallback = serveStatic({ path: `${staticDir}/index.html` })
+  }
+
+  const app = createApp({ staticMiddleware, spaFallback })
 
   const server = Bun.serve<WsData>({
     port: Number(process.env['PORT'] ?? 3000),
