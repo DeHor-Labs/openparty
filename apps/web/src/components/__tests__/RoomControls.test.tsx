@@ -33,6 +33,7 @@ describe('RoomControls', () => {
         onPlay={onPlay}
         onPause={vi.fn()}
         onSeek={vi.fn()}
+        durationSecs={0}
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /play/i }))
@@ -48,6 +49,7 @@ describe('RoomControls', () => {
         onPlay={vi.fn()}
         onPause={onPause}
         onSeek={vi.fn()}
+        durationSecs={0}
       />
     )
     fireEvent.click(screen.getByRole('button', { name: /pause/i }))
@@ -62,6 +64,7 @@ describe('RoomControls', () => {
         onPlay={vi.fn()}
         onPause={vi.fn()}
         onSeek={vi.fn()}
+        durationSecs={0}
       />
     )
     const toggle = screen.getByRole('switch', { name: /host.lock/i })
@@ -77,6 +80,7 @@ describe('RoomControls', () => {
         onPlay={vi.fn()}
         onPause={vi.fn()}
         onSeek={vi.fn()}
+        durationSecs={0}
       />
     )
     const toggle = screen.getByRole('switch', { name: /host.lock/i })
@@ -94,6 +98,7 @@ describe('RoomControls', () => {
         onPause={vi.fn()}
         onSeek={vi.fn()}
         onSetHostLock={onSetHostLock}
+        durationSecs={0}
       />
     )
     fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
@@ -110,6 +115,7 @@ describe('RoomControls', () => {
         onPause={vi.fn()}
         onSeek={vi.fn()}
         onSetHostLock={onSetHostLock}
+        durationSecs={0}
       />
     )
     fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
@@ -126,9 +132,42 @@ describe('RoomControls', () => {
         onPause={vi.fn()}
         onSeek={vi.fn()}
         onSetHostLock={onSetHostLock}
+        durationSecs={0}
       />
     )
     fireEvent.click(screen.getByRole('switch', { name: /host.lock/i }))
     expect(onSetHostLock).not.toHaveBeenCalled()
+  })
+
+  it('slider de seek usa durationSecs real como max (duracao conectada ao adapter)', () => {
+    // BUG anterior: durationSecs era opcional com fallback 3600, mascarando que
+    // o caller real nao passava a duracao. FIX: campo obrigatorio, wired ao getDuration().
+    render(
+      <RoomControls
+        roomState={makeState({ positionSecs: 0 })}
+        isHost
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onSeek={vi.fn()}
+        durationSecs={7200}
+      />
+    )
+    const slider = screen.getByRole('slider', { name: /seek/i })
+    expect(slider.getAttribute('max')).toBe('7200')
+  })
+
+  it('slider de seek usa 0 como max quando durationSecs=0 (player ainda nao carregou)', () => {
+    render(
+      <RoomControls
+        roomState={makeState({ positionSecs: 0 })}
+        isHost
+        onPlay={vi.fn()}
+        onPause={vi.fn()}
+        onSeek={vi.fn()}
+        durationSecs={0}
+      />
+    )
+    const slider = screen.getByRole('slider', { name: /seek/i })
+    expect(slider.getAttribute('max')).toBe('0')
   })
 })

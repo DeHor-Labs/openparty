@@ -22,6 +22,7 @@ describe('createHtml5Adapter', () => {
     expect(typeof adapter.pause).toBe('function')
     expect(typeof adapter.seekTo).toBe('function')
     expect(typeof adapter.getCurrentTime).toBe('function')
+    expect(typeof adapter.getDuration).toBe('function')
     expect(typeof adapter.setPlaybackRate).toBe('function')
     expect(typeof adapter.on).toBe('function')
     expect(typeof adapter.off).toBe('function')

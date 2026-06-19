@@ -35,6 +35,7 @@ interface YTPlayer {
   pauseVideo(): void
   seekTo(secs: number, allowSeekAhead: boolean): void
   getCurrentTime(): number
+  getDuration(): number
   setPlaybackRate(rate: number): void
   destroy(): void
 }
@@ -42,37 +43,77 @@ interface YTPlayer {
 let apiLoaded = false
 let apiPromise: Promise<void> | null = null
 
+/** Tempo maximo esperando a API do YouTube carregar antes de rejeitar */
+const YOUTUBE_API_TIMEOUT_MS = 10_000
+
 function loadYouTubeApi(): Promise<void> {
   if (apiLoaded) return Promise.resolve()
   if (apiPromise) return apiPromise
 
-  apiPromise = new Promise((resolve) => {
+  apiPromise = new Promise((resolve, reject) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+    // Cancela o timeout e marca como carregado ao resolver
+    function onReady() {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle)
+        timeoutHandle = null
+      }
+      apiLoaded = true
+      resolve()
+    }
+
+    // Rejeita a promise e limpa o singleton para permitir nova tentativa
+    function onFailed(reason: string) {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle)
+        timeoutHandle = null
+      }
+      apiPromise = null
+      reject(new Error(reason))
+    }
+
+    // Timeout de seguranca: rejeita se a API nao carregar a tempo
+    timeoutHandle = setTimeout(() => {
+      onFailed('YouTube IFrame API nao carregou dentro do tempo limite')
+    }, YOUTUBE_API_TIMEOUT_MS)
+
     // Caso o script ja esteja no DOM e a API ja esteja pronta
-    if (document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+    const existingScript = document.querySelector('script[src*="youtube.com/iframe_api"]') as HTMLScriptElement | null
+    if (existingScript) {
       if (window.YT?.Player) {
-        apiLoaded = true
-        resolve()
+        onReady()
         return
       }
-      // Script esta no DOM mas window.YT ainda nao carregou:
-      // encadeia no callback global sem adicionar novo script.
+      // Script esta no DOM mas window.YT ainda nao carregou.
+      // Encadeia no callback global sem adicionar novo script.
+      // Registra onerror no script existente para rejeitar se ele falhar.
+      const prevError = existingScript.onerror
+      existingScript.onerror = (event) => {
+        prevError?.call(existingScript, event)
+        onFailed('Falha ao carregar o script da YouTube IFrame API (script existente)')
+      }
       const prevReady = window.onYouTubeIframeAPIReady
       window.onYouTubeIframeAPIReady = () => {
         prevReady?.()
-        apiLoaded = true
-        resolve()
+        onReady()
       }
       return
     }
 
     // Primeiro carregamento: injeta o script e aguarda o callback global
     window.onYouTubeIframeAPIReady = () => {
-      apiLoaded = true
-      resolve()
+      onReady()
     }
 
     const script = document.createElement('script')
     script.src = 'https://www.youtube.com/iframe_api'
+
+    // Handler de erro: rejeita se o script falhar ao carregar
+    script.onerror = () => {
+      onFailed('Falha ao carregar o script da YouTube IFrame API')
+    }
+
     document.head.appendChild(script)
   })
 
@@ -147,6 +188,7 @@ export async function createYouTubeAdapter(
         return Promise.resolve()
       },
       getCurrentTime: () => ytPlayer.getCurrentTime(),
+      getDuration: () => ytPlayer.getDuration(),
       setPlaybackRate: (rate: number) => {
         ytPlayer.setPlaybackRate(nearestSupportedRate(rate))
       },

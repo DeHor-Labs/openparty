@@ -25,6 +25,7 @@ function makeAdapter(currentTime = 10.0): PlayerAdapter {
     pause: vi.fn().mockResolvedValue(undefined),
     seekTo: vi.fn().mockResolvedValue(undefined),
     getCurrentTime: vi.fn(() => currentTime),
+    getDuration: vi.fn(() => 3600),
     setPlaybackRate: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
@@ -113,5 +114,26 @@ describe('useSync', () => {
     vi.advanceTimersByTime(1500)
 
     expect(adapter.seekTo).toHaveBeenCalledWith(12)
+  })
+
+  it('ao decidir seek, reseta playbackRate para roomState.playbackRate (desfaz adjust-rate anterior)', () => {
+    // BUG: ramo 'seek' nao chamava setPlaybackRate apos o seek, deixando
+    // eventual adjust-rate anterior ainda ativo no player.
+    // FIX: ao fazer seek, resetar playbackRate para roomState.playbackRate.
+    const now = Date.now()
+    const serverNow = vi.fn(() => now)
+    const state = makeRoomState({
+      positionSecs: 12,
+      lastEventAt: now,
+      playbackRate: 1.0,
+    })
+    const adapter = makeAdapter(10.0) // drift = 2s -> seek
+
+    renderHook(() => useSync(state, adapter, serverNow))
+    vi.advanceTimersByTime(1500)
+
+    expect(adapter.seekTo).toHaveBeenCalledWith(12)
+    // Apos o seek, playbackRate deve ser resetado para 1x
+    expect(adapter.setPlaybackRate).toHaveBeenCalledWith(1.0)
   })
 })

@@ -1,11 +1,16 @@
 // apps/server/src/__tests__/integration.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { ServerEvent, RoomStateEvent } from '@openparty/protocol'
+import type { ServerEvent } from '@openparty/protocol'
+import { _resetStoreForTesting } from '../rooms'
 
-// Reset do store de salas entre testes
 vi.mock('../rooms', async (importOriginal) => {
   const original = await importOriginal<typeof import('../rooms')>()
   return original
+})
+
+// Garante isolamento: limpa o singleton 'rooms' antes de cada teste
+beforeEach(() => {
+  _resetStoreForTesting()
 })
 
 // Importacao lazy para garantir mocks aplicados antes

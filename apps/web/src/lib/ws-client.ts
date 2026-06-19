@@ -30,6 +30,19 @@ export interface WsClient {
 }
 
 const MAX_RECONNECT_DELAY_MS = 30_000
+/** Numero maximo de mensagens na fila de envio pendente */
+const MAX_QUEUE_SIZE = 100
+/** Faixa de close codes reservados para uso de aplicacao (nao reconectar) */
+const APP_CLOSE_CODE_MIN = 4000
+const APP_CLOSE_CODE_MAX = 4999
+
+/**
+ * Close codes do protocolo WebSocket que sinalizam falha permanente:
+ * - 1002 (Protocol Error): servidor rejeitou por violacao de protocolo.
+ * - 1008 (Policy Violation): servidor rejeitou handshake ou regra de seguranca.
+ * Nesses casos reconectar nao resolveria e causaria loop infinito.
+ */
+const FATAL_CLOSE_CODES = new Set([1002, 1008])
 
 export function createWsClient(options: WsClientOptions): WsClient {
   const {
@@ -79,7 +92,7 @@ export function createWsClient(options: WsClientOptions): WsClient {
       onOpen?.()
     }
 
-    ws.onclose = (_evt) => {
+    ws.onclose = (evt) => {
       // Garante que onClose nao seja disparado mais de uma vez por fechamento
       if (closeFired) return
       closeFired = true
@@ -87,6 +100,14 @@ export function createWsClient(options: WsClientOptions): WsClient {
       onClose?.()
 
       if (destroyed) return
+
+      // Close codes 4xxx sao reservados para uso de aplicacao (ex: autenticacao invalida,
+      // sala encerrada). Nesses casos nao faz sentido reconectar automaticamente.
+      if (evt.code >= APP_CLOSE_CODE_MIN && evt.code <= APP_CLOSE_CODE_MAX) return
+
+      // Close codes de protocolo que indicam falha permanente (ex: handshake recusado
+      // com 1008 Policy Violation, ou violacao de protocolo 1002): reconectar nao resolve.
+      if (FATAL_CLOSE_CODES.has(evt.code)) return
 
       // Reconexao com backoff exponencial
       const delay = Math.min(
@@ -127,16 +148,26 @@ export function createWsClient(options: WsClientOptions): WsClient {
       if (ws && ws.readyState === WebSocket.OPEN) {
         trySend(event)
       } else {
+        // Ao exceder o limite, descarta a mensagem mais antiga para manter as mais recentes
+        if (queue.length >= MAX_QUEUE_SIZE) {
+          queue.shift()
+        }
         queue.push(event)
       }
     },
 
+    /**
+     * Fecha a conexao e cancela reconexoes pendentes.
+     * Mensagens enfileiradas aguardando envio sao descartadas ao chamar este metodo.
+     */
     close() {
       destroyed = true
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
+      // Descarta mensagens pendentes na fila: apos close() nao ha mais conexao destino.
+      queue.length = 0
       ws?.close()
     },
 

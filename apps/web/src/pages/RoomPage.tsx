@@ -1,5 +1,5 @@
 // apps/web/src/pages/RoomPage.tsx
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom'
 import { RoomPlayer } from '../components/room/RoomPlayer'
@@ -30,12 +30,34 @@ export function RoomPage() {
     _setAdapter,
   } = useRoom(roomId, { displayName, avatar })
 
-  const [, setAdapter] = useState<PlayerAdapter | null>(null)
+  const [adapter, setAdapter] = useState<PlayerAdapter | null>(null)
+  /**
+   * Duracao real do video em segundos obtida do adapter.
+   * Começa em 0 (player ainda nao carregou) e atualiza via evento 'ready'.
+   */
+  const [durationSecs, setDurationSecs] = useState(0)
 
-  function handleAdapterReady(adapter: PlayerAdapter) {
-    setAdapter(adapter)
-    _setAdapter?.(adapter)
+  function handleAdapterReady(newAdapter: PlayerAdapter) {
+    setAdapter(newAdapter)
+    _setAdapter?.(newAdapter)
+    // Tenta ler a duracao imediata (pode ser 0 para YouTube antes do onReady)
+    const d = newAdapter.getDuration()
+    if (d > 0) setDurationSecs(d)
   }
+
+  // Registra listener 'ready' no adapter para capturar a duracao real
+  // quando os metadados do video ficarem disponíveis apos o adapter pronto.
+  useEffect(() => {
+    if (!adapter) return
+    function onReady() {
+      const d = adapter!.getDuration()
+      if (d > 0) setDurationSecs(d)
+    }
+    adapter.on('ready', onReady)
+    return () => {
+      adapter.off('ready', onReady)
+    }
+  }, [adapter])
 
   if (!roomState) {
     return (
@@ -69,6 +91,7 @@ export function RoomPage() {
           onPause={sendPause}
           onSeek={sendSeek}
           onSetHostLock={sendSetHostLock}
+          durationSecs={durationSecs}
         />
       </main>
       <RoomSidebar peers={peers} messages={messages} onSendMessage={sendChat} />

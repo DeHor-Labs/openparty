@@ -9,6 +9,13 @@ interface RoomControlsProps {
   onSeek: (time: number) => void
   /** Chamado pelo host ao clicar no toggle de host-lock */
   onSetHostLock?: (locked: boolean) => void
+  /**
+   * Duracao real do video em segundos; usada como max do slider de seek.
+   * Obrigatorio: o caller deve passar a duracao real do adapter/player.
+   * Passar 0 enquanto o player nao estiver pronto e valido; o slider nao
+   * se move se o video ainda nao carregou.
+   */
+  durationSecs: number
 }
 
 export function RoomControls({
@@ -18,6 +25,7 @@ export function RoomControls({
   onPause,
   onSeek,
   onSetHostLock,
+  durationSecs,
 }: RoomControlsProps) {
   const { playing, positionSecs, hostLock } = roomState
 
@@ -49,7 +57,7 @@ export function RoomControls({
         <input
           type="range"
           min={0}
-          max={3600}
+          max={durationSecs}
           step={1}
           value={positionSecs}
           onChange={handleSeekChange}

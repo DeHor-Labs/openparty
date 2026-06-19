@@ -11,8 +11,6 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => mockNavigate }
 })
 
-global.fetch = vi.fn()
-
 /** Wrapper que prove ThemeProvider e Router para os testes de Home */
 function renderHome() {
   return render(
@@ -25,13 +23,9 @@ function renderHome() {
 }
 
 describe('Home', () => {
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   beforeEach(() => {
     vi.clearAllMocks()
+
     // jsdom nao implementa matchMedia; stub necessario para ThemeProvider
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: false,
@@ -39,6 +33,15 @@ describe('Home', () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     }))
+
+    // Stub de fetch restaurado automaticamente no afterEach via vi.unstubAllGlobals()
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  afterEach(() => {
+    cleanup()
+    // Restaura todos os stubs globais (fetch, matchMedia, etc.)
+    vi.unstubAllGlobals()
   })
 
   it('renderiza os inputs de URL, nickname e avatar', () => {
@@ -46,6 +49,14 @@ describe('Home', () => {
     expect(screen.getByPlaceholderText(/youtube\.com|youtu\.be/i)).toBeDefined()
     expect(screen.getByPlaceholderText(/nickname/i)).toBeDefined()
     expect(screen.getByRole('button', { name: /entrar|criar sala/i })).toBeDefined()
+  })
+
+  it('fetch e restaurado entre testes (nao vaza entre testes)', () => {
+    // Verifica que fetch foi stubado pelo beforeEach (nao esta como undefined ou funcao nativa)
+    // e que e um mock vi.fn() fresco (sem chamadas anteriores)
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    expect(fetchMock).toBeDefined()
+    expect(fetchMock.mock.calls).toHaveLength(0)
   })
 
   it('POST /rooms com mediaUrl e redireciona para /room/:roomId', async () => {

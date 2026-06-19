@@ -13,6 +13,7 @@ import {
   MAX_TIME_SECS,
   CHAT_MAX_LENGTH,
   EMOJI_MAX_LENGTH,
+  type ClientEvent,
 } from '../events'
 
 // ---------------------------------------------------------------------------
@@ -100,32 +101,56 @@ describe.each(['play', 'pause', 'seek'] as const)('isClientEvent - %s - campo ti
 // ---------------------------------------------------------------------------
 
 describe('isClientEvent - clock-ping', () => {
-  it('aceita clock-ping com t1 finito', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: Date.now() })).toBe(true)
+  it('aceita clock-ping com t1 finito e totalPings valido', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: Date.now(), totalPings: 8 })).toBe(true)
   })
 
-  it('aceita t1=0', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: 0 })).toBe(true)
+  it('aceita t1=0 com totalPings=1', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 0, totalPings: 1 })).toBe(true)
+  })
+
+  it('aceita totalPings=3 (recalibracao)', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000, totalPings: 3 })).toBe(true)
   })
 
   it('rejeita t1 ausente', () => {
-    expect(isClientEvent({ type: 'clock-ping' })).toBe(false)
+    expect(isClientEvent({ type: 'clock-ping', totalPings: 8 })).toBe(false)
   })
 
   it('rejeita t1 null', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: null })).toBe(false)
+    expect(isClientEvent({ type: 'clock-ping', t1: null, totalPings: 8 })).toBe(false)
   })
 
   it('rejeita t1 string', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: '1000' })).toBe(false)
+    expect(isClientEvent({ type: 'clock-ping', t1: '1000', totalPings: 8 })).toBe(false)
   })
 
   it('rejeita t1 NaN', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: NaN })).toBe(false)
+    expect(isClientEvent({ type: 'clock-ping', t1: NaN, totalPings: 8 })).toBe(false)
   })
 
   it('rejeita t1 Infinity', () => {
-    expect(isClientEvent({ type: 'clock-ping', t1: Infinity })).toBe(false)
+    expect(isClientEvent({ type: 'clock-ping', t1: Infinity, totalPings: 8 })).toBe(false)
+  })
+
+  it('aceita clock-ping sem totalPings (campo opcional, compatibilidade retroativa)', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000 })).toBe(true)
+  })
+
+  it('rejeita totalPings=0 (deve ser >= 1)', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000, totalPings: 0 })).toBe(false)
+  })
+
+  it('rejeita totalPings negativo', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000, totalPings: -1 })).toBe(false)
+  })
+
+  it('rejeita totalPings string', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000, totalPings: '8' })).toBe(false)
+  })
+
+  it('rejeita totalPings decimal (deve ser inteiro)', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: 1000, totalPings: 1.5 })).toBe(false)
   })
 })
 
@@ -266,7 +291,7 @@ describe('isSeekClientEvent', () => {
 
 describe('isClockPingEvent', () => {
   it('retorna true para clock-ping valido', () => {
-    expect(isClockPingEvent({ type: 'clock-ping', t1: Date.now() })).toBe(true)
+    expect(isClockPingEvent({ type: 'clock-ping', t1: Date.now(), totalPings: 8 })).toBe(true)
   })
 
   it('retorna false para outro tipo', () => {
@@ -321,5 +346,210 @@ describe('isSetHostLockEvent', () => {
 
   it('retorna false para outro tipo', () => {
     expect(isSetHostLockEvent({ type: 'chat', text: 'oi' })).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Casos negativos de shape malformada nos guards de subtipo
+// Garante que guards rejeitam payloads com campos faltando ou tipos errados,
+// mesmo quando o objeto passa pelo cast de ClientEvent.
+// ---------------------------------------------------------------------------
+
+describe('isClientEvent - casos negativos de shape por subtipo', () => {
+  // play / pause / seek: campo time obrigatorio
+
+  it('rejeita play sem campo time', () => {
+    expect(isClientEvent({ type: 'play' })).toBe(false)
+  })
+
+  it('rejeita pause sem campo time', () => {
+    expect(isClientEvent({ type: 'pause' })).toBe(false)
+  })
+
+  it('rejeita seek sem campo time', () => {
+    expect(isClientEvent({ type: 'seek' })).toBe(false)
+  })
+
+  it('rejeita play com time undefined', () => {
+    expect(isClientEvent({ type: 'play', time: undefined })).toBe(false)
+  })
+
+  it('rejeita pause com time boolean', () => {
+    expect(isClientEvent({ type: 'pause', time: true })).toBe(false)
+  })
+
+  it('rejeita seek com time objeto', () => {
+    expect(isClientEvent({ type: 'seek', time: {} })).toBe(false)
+  })
+
+  // clock-ping: campo t1 obrigatorio
+
+  it('rejeita clock-ping sem t1 (mesmo com totalPings presente)', () => {
+    expect(isClientEvent({ type: 'clock-ping', totalPings: 8 })).toBe(false)
+  })
+
+  it('rejeita clock-ping com t1 booleano', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: false, totalPings: 8 })).toBe(false)
+  })
+
+  it('rejeita clock-ping com t1 objeto', () => {
+    expect(isClientEvent({ type: 'clock-ping', t1: {}, totalPings: 8 })).toBe(false)
+  })
+
+  // chat: campo text obrigatorio e deve ser string
+
+  it('rejeita chat com text number', () => {
+    expect(isClientEvent({ type: 'chat', text: 0 })).toBe(false)
+  })
+
+  it('rejeita chat com text boolean', () => {
+    expect(isClientEvent({ type: 'chat', text: true })).toBe(false)
+  })
+
+  it('rejeita chat com text array', () => {
+    expect(isClientEvent({ type: 'chat', text: ['mensagem'] })).toBe(false)
+  })
+
+  it('rejeita chat com text objeto', () => {
+    expect(isClientEvent({ type: 'chat', text: { conteudo: 'oi' } })).toBe(false)
+  })
+
+  it('rejeita chat com text undefined', () => {
+    expect(isClientEvent({ type: 'chat', text: undefined })).toBe(false)
+  })
+
+  // reaction: campo emoji obrigatorio e deve ser string
+
+  it('rejeita reaction com emoji number', () => {
+    expect(isClientEvent({ type: 'reaction', emoji: 128512 })).toBe(false)
+  })
+
+  it('rejeita reaction com emoji booleano', () => {
+    expect(isClientEvent({ type: 'reaction', emoji: true })).toBe(false)
+  })
+
+  it('rejeita reaction com emoji objeto', () => {
+    expect(isClientEvent({ type: 'reaction', emoji: { code: '1f600' } })).toBe(false)
+  })
+
+  it('rejeita reaction com emoji undefined', () => {
+    expect(isClientEvent({ type: 'reaction', emoji: undefined })).toBe(false)
+  })
+
+  // set-host-lock: campo locked obrigatorio e deve ser boolean
+
+  it('rejeita set-host-lock com locked number', () => {
+    expect(isClientEvent({ type: 'set-host-lock', locked: 1 })).toBe(false)
+  })
+
+  it('rejeita set-host-lock com locked string', () => {
+    expect(isClientEvent({ type: 'set-host-lock', locked: 'true' })).toBe(false)
+  })
+
+  it('rejeita set-host-lock com locked undefined', () => {
+    expect(isClientEvent({ type: 'set-host-lock', locked: undefined })).toBe(false)
+  })
+
+  it('rejeita set-host-lock com locked null', () => {
+    expect(isClientEvent({ type: 'set-host-lock', locked: null })).toBe(false)
+  })
+
+  // Tipos completamente invalidos na raiz
+
+  it('rejeita array vazio', () => {
+    expect(isClientEvent([])).toBe(false)
+  })
+
+  it('rejeita objeto vazio', () => {
+    expect(isClientEvent({})).toBe(false)
+  })
+
+  it('rejeita undefined', () => {
+    expect(isClientEvent(undefined)).toBe(false)
+  })
+
+  it('rejeita boolean true', () => {
+    expect(isClientEvent(true)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Casos negativos diretos nos guards de subtipo (via cast forcado)
+// Garante que o guard de subtipo rejeita eventos do tipo errado
+// com campos de shape diferentes.
+// ---------------------------------------------------------------------------
+
+describe('guards de subtipo - rejeicoes de tipo cruzado', () => {
+  it('isPlayClientEvent retorna false para seek', () => {
+    expect(isPlayClientEvent({ type: 'seek', time: 0 })).toBe(false)
+  })
+
+  it('isPlayClientEvent retorna false para clock-ping', () => {
+    // Cast necessario: payload intencionalmente sem totalPings para testar o guard de subtipo
+    expect(isPlayClientEvent({ type: 'clock-ping', t1: 0 } as unknown as ClientEvent)).toBe(false)
+  })
+
+  it('isPauseClientEvent retorna false para seek', () => {
+    expect(isPauseClientEvent({ type: 'seek', time: 0 })).toBe(false)
+  })
+
+  it('isPauseClientEvent retorna false para chat', () => {
+    expect(isPauseClientEvent({ type: 'chat', text: 'oi' })).toBe(false)
+  })
+
+  it('isSeekClientEvent retorna false para play', () => {
+    expect(isSeekClientEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isSeekClientEvent retorna false para reaction', () => {
+    expect(isSeekClientEvent({ type: 'reaction', emoji: '👏' })).toBe(false)
+  })
+
+  it('isClockPingEvent retorna false para chat', () => {
+    expect(isClockPingEvent({ type: 'chat', text: 'oi' })).toBe(false)
+  })
+
+  it('isClockPingEvent retorna false para seek', () => {
+    expect(isClockPingEvent({ type: 'seek', time: 0 })).toBe(false)
+  })
+
+  it('isChatClientEvent retorna false para seek', () => {
+    expect(isChatClientEvent({ type: 'seek', time: 0 })).toBe(false)
+  })
+
+  it('isChatClientEvent retorna false para play', () => {
+    expect(isChatClientEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isReactionClientEvent retorna false para play', () => {
+    expect(isReactionClientEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isReactionClientEvent retorna false para seek', () => {
+    expect(isReactionClientEvent({ type: 'seek', time: 0 })).toBe(false)
+  })
+
+  it('isBufferingStartEvent retorna false para play', () => {
+    expect(isBufferingStartEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isBufferingStartEvent retorna false para chat', () => {
+    expect(isBufferingStartEvent({ type: 'chat', text: 'oi' })).toBe(false)
+  })
+
+  it('isBufferingEndEvent retorna false para play', () => {
+    expect(isBufferingEndEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isBufferingEndEvent retorna false para chat', () => {
+    expect(isBufferingEndEvent({ type: 'chat', text: 'oi' })).toBe(false)
+  })
+
+  it('isSetHostLockEvent retorna false para play', () => {
+    expect(isSetHostLockEvent({ type: 'play', time: 0 })).toBe(false)
+  })
+
+  it('isSetHostLockEvent retorna false para buffering-start', () => {
+    expect(isSetHostLockEvent({ type: 'buffering-start' })).toBe(false)
   })
 })

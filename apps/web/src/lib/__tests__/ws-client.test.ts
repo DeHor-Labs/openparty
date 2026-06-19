@@ -302,4 +302,139 @@ describe('createWsClient', () => {
     // onClose deve ter sido chamado apenas uma vez (pelo simulateDrop)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  // --- Testes de limite de fila (MAX_QUEUE_SIZE) ---
+
+  it('descarta mensagens mais antigas quando fila excede MAX_QUEUE_SIZE', () => {
+    const client = createWsClient(makeOptions())
+    const ws = MockWebSocket.lastInstance()
+    // Nao abre a conexao: mensagens ficam na fila
+
+    // Enfileira 110 mensagens (MAX_QUEUE_SIZE = 100)
+    for (let i = 0; i < 110; i++) {
+      client.send({ type: 'chat', text: `msg-${i}` })
+    }
+
+    // Abre a conexao para drenar a fila
+    ws.simulateOpen()
+
+    // Deve ter enviado EXATAMENTE MAX_QUEUE_SIZE mensagens (boundary exato)
+    const sent = ws.sentMessages.map((m) => JSON.parse(m) as { type: string; text: string })
+    expect(sent.length).toBe(100)
+
+    // As 10 mensagens mais antigas (msg-0 a msg-9) devem ter sido descartadas
+    const texts = sent.map((m) => m.text)
+    expect(texts).not.toContain('msg-0')
+    expect(texts).not.toContain('msg-9')
+    // As mais recentes devem estar presentes
+    expect(texts).toContain('msg-10') // primeira mantida
+    expect(texts).toContain('msg-109') // mais recente
+  })
+
+  // --- Testes de close codes 4xxx ---
+
+  it('nao reconecta quando close code esta na faixa 4000-4999', () => {
+    const client = createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    // Simula fechamento com code de aplicacao (4xxx)
+    ws.readyState = MockWebSocket.CLOSED
+    const evt = new CloseEvent('close', { wasClean: true, code: 4001 })
+    ws.onclose?.(evt)
+
+    // Avanca tempo suficiente para reconexao ocorrer se houvesse
+    vi.advanceTimersByTime(500)
+
+    // Nenhuma nova instancia: nao deve reconectar
+    expect(MockWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
+
+  it('reconecta quando close code e 1006 (queda inesperada)', () => {
+    createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+    ws.simulateDrop() // code 1006
+
+    vi.advanceTimersByTime(100)
+
+    // Deve ter criado nova instancia (reconexao)
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it('nao reconecta quando close code e 1008 (Policy Violation - handshake invalido)', () => {
+    // 1008 e o close code usado pelo servidor ao rejeitar handshake invalido.
+    // Reconectar nao resolveria e causaria loop infinito.
+    const client = createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    ws.readyState = MockWebSocket.CLOSED
+    const evt = new CloseEvent('close', { wasClean: true, code: 1008 })
+    ws.onclose?.(evt)
+
+    vi.advanceTimersByTime(500)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
+
+  it('nao reconecta quando close code e 1002 (Protocol Error)', () => {
+    const client = createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    ws.readyState = MockWebSocket.CLOSED
+    const evt = new CloseEvent('close', { wasClean: true, code: 1002 })
+    ws.onclose?.(evt)
+
+    vi.advanceTimersByTime(500)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
+
+  it('descarta fila de mensagens pendentes ao chamar close()', () => {
+    const client = createWsClient(makeOptions())
+    // Enfileira mensagens sem abrir o socket
+    client.send({ type: 'chat', text: 'msg-1' })
+    client.send({ type: 'chat', text: 'msg-2' })
+
+    // Fecha sem abrir: a fila deve ser descartada
+    client.close()
+
+    const ws = MockWebSocket.lastInstance()
+    // Abre para verificar que nenhuma mensagem e entregue
+    ws.simulateOpen()
+
+    // Somente o handshake nao configurado: nenhuma mensagem deve ter sido enviada
+    expect(ws.sentMessages).toHaveLength(0)
+  })
+
+  it('nao reconecta quando close code e 4000 (limite inferior da faixa 4xxx)', () => {
+    const client = createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    ws.readyState = MockWebSocket.CLOSED
+    const evt = new CloseEvent('close', { wasClean: true, code: 4000 })
+    ws.onclose?.(evt)
+
+    vi.advanceTimersByTime(500)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
+
+  it('nao reconecta quando close code e 4999 (limite superior da faixa 4xxx)', () => {
+    const client = createWsClient(makeOptions({ reconnectDelayMs: 100 }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    ws.readyState = MockWebSocket.CLOSED
+    const evt = new CloseEvent('close', { wasClean: true, code: 4999 })
+    ws.onclose?.(evt)
+
+    vi.advanceTimersByTime(500)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    client.close()
+  })
 })

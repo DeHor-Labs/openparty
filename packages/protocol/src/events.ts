@@ -44,6 +44,14 @@ export interface ClockPingEvent {
   type: 'clock-ping'
   /** Date.now() do cliente no momento do envio */
   t1: number
+  /**
+   * Total de pings da sessao de calibracao corrente.
+   * O servidor faz eco deste valor no clock-pong para que o cliente saiba
+   * quando acumulou amostras suficientes (calibracao inicial vs recalibracao).
+   * Campo opcional para compatibilidade com clientes mais antigos;
+   * o consumidor deve usar o padrao INITIAL_PINGS quando ausente.
+   */
+  totalPings?: number
 }
 
 export interface BufferingStartEvent {
@@ -127,6 +135,12 @@ export interface ClockPongEvent {
   t2: number
   /** Date.now() do servidor ao enviar o pong */
   t3: number
+  /**
+   * Total de pings da sessao de calibracao corrente.
+   * O cliente usa este valor para saber quando acumulou amostras suficientes.
+   * Varia entre calibracao inicial (INITIAL_PINGS) e recalibracao (RECALIBRATE_PINGS).
+   */
+  totalPings: number
 }
 
 export interface JoinEvent {
@@ -238,8 +252,15 @@ export function isClientEvent(raw: unknown): raw is ClientEvent {
     case 'seek':
       return isValidTimeSecs(obj['time'])
 
-    case 'clock-ping':
-      return typeof obj['t1'] === 'number' && Number.isFinite(obj['t1'])
+    case 'clock-ping': {
+      if (typeof obj['t1'] !== 'number' || !Number.isFinite(obj['t1'])) return false
+      // totalPings e opcional: quando presente deve ser number inteiro >= 1
+      const tp = obj['totalPings']
+      if (tp !== undefined) {
+        if (typeof tp !== 'number' || !Number.isInteger(tp) || (tp as number) < 1) return false
+      }
+      return true
+    }
 
     case 'chat': {
       const text = obj['text']
