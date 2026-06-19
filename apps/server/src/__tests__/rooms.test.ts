@@ -139,11 +139,13 @@ describe('joinRoom', () => {
 // -----------------------------------------------------------------------
 
 describe('leaveRoom', () => {
-  it('remove o cliente do Map', () => {
+  it('remove o cliente do Map (sala com 2 clientes, host permanece)', () => {
     const roomId = createRoom('https://x.com/v.mp4', 'mp4')
     joinRoom(roomId, makeClient('user-1', 1000))
-    leaveRoom(roomId, 'user-1')
-    expect(getRoom(roomId)!.clients.has('user-1')).toBe(false)
+    joinRoom(roomId, makeClient('user-2', 2000))
+    leaveRoom(roomId, 'user-2') // user-2 nao e host, sala continua viva
+    expect(getRoom(roomId)!.clients.has('user-2')).toBe(false)
+    expect(getRoom(roomId)!.clients.has('user-1')).toBe(true)
   })
 
   it('nao faz nada se o userId nao esta na sala', () => {
@@ -216,7 +218,17 @@ describe('leaveRoom', () => {
     const roomId = createRoom('https://x.com/v.mp4', 'mp4')
     joinRoom(roomId, makeClient('user-A', 1000))
     expect(() => leaveRoom(roomId, 'user-A')).not.toThrow()
-    expect(getRoom(roomId)!.clients.size).toBe(0)
+    // Sala deve ser removida do Map ao ficar vazia (evita memory leak)
+    expect(getRoom(roomId)).toBeUndefined()
+  })
+
+  it('remove sala do Map quando ultimo cliente nao-host sai', () => {
+    const roomId = createRoom('https://x.com/v.mp4', 'mp4')
+    joinRoom(roomId, makeClient('user-A', 1000))
+    joinRoom(roomId, makeClient('user-B', 2000))
+    leaveRoom(roomId, 'user-A') // host sai, user-B vira host
+    leaveRoom(roomId, 'user-B') // ultimo cliente sai
+    expect(getRoom(roomId)).toBeUndefined()
   })
 })
 

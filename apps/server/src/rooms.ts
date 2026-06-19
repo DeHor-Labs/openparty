@@ -88,8 +88,14 @@ export function leaveRoom(roomId: string, userId: string): void {
   const wasHost = room.state.hostId === userId
   room.clients.delete(userId)
 
-  if (wasHost && room.clients.size > 0) {
-    // Elege o cliente mais antigo (menor connectedAt)
+  if (room.clients.size === 0) {
+    // Sala ficou vazia - remover do Map para evitar memory leak
+    rooms.delete(roomId)
+    return
+  }
+
+  if (wasHost) {
+    // Elege o cliente mais antigo (menor connectedAt) como novo host
     let nextHost: RoomClient | null = null
     for (const c of room.clients.values()) {
       if (!nextHost || c.connectedAt < nextHost.connectedAt) {
@@ -109,9 +115,6 @@ export function leaveRoom(roomId: string, userId: string): void {
         c.send(hostChangeEvent)
       }
     }
-  } else if (wasHost && room.clients.size === 0) {
-    // Sala ficou vazia - limpar hostId
-    room.state = { ...room.state, hostId: '' }
   }
 }
 
