@@ -17,7 +17,7 @@ interface ReactionsLayerProps {
   onReact: (emoji: string) => void
 }
 
-export function ReactionsLayer({ reactions, onReact }: ReactionsLayerProps): JSX.Element {
+export function ReactionsLayer({ reactions, onReact }: ReactionsLayerProps) {
   const [floating, setFloating] = useState<FloatingEmoji[]>([])
 
   // Converte reactions recentes em emojis flutuantes

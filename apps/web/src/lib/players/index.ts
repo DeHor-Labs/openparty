@@ -1,3 +1,6 @@
+export { createYouTubeAdapter } from './youtube'
+export { createHtml5Adapter } from './html5'
+
 export type MediaType = 'youtube' | 'mp4'
 
 export type PlayerEventName =

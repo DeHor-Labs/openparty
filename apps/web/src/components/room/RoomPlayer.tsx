@@ -9,7 +9,7 @@ interface RoomPlayerProps {
   onAdapterReady: (adapter: PlayerAdapter) => void
 }
 
-export function RoomPlayer({ roomState, onAdapterReady }: RoomPlayerProps): JSX.Element {
+export function RoomPlayer({ roomState, onAdapterReady }: RoomPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const adapterRef = useRef<PlayerAdapter | null>(null)

@@ -9,7 +9,7 @@ interface RoomControlsProps {
   onSeek: (time: number) => void
 }
 
-export function RoomControls({ roomState, isHost, onPlay, onPause, onSeek }: RoomControlsProps): JSX.Element {
+export function RoomControls({ roomState, isHost, onPlay, onPause, onSeek }: RoomControlsProps) {
   const { playing, positionSecs, hostLock } = roomState
 
   function handleSeekChange(e: React.ChangeEvent<HTMLInputElement>) {

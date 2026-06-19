@@ -8,7 +8,7 @@ import { RoomControls } from '../components/room/RoomControls'
 import { ReactionsLayer } from '../components/room/ReactionsLayer'
 import type { PlayerAdapter } from '../lib/players/index'
 
-export function RoomPage(): JSX.Element {
+export function RoomPage() {
   const { roomId = '' } = useParams()
   const displayName = sessionStorage.getItem('op_nickname') ?? 'Anonimo'
   const avatar = sessionStorage.getItem('op_avatar') ?? '🎬'

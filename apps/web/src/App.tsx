@@ -4,7 +4,7 @@ import { Home } from './components/Home'
 import { RoomPage } from './pages/RoomPage'
 import { ThemeProvider } from './lib/ThemeContext'
 
-export function App(): JSX.Element {
+export function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>

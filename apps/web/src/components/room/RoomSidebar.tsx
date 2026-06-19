@@ -11,7 +11,7 @@ interface RoomSidebarProps {
 
 type Tab = 'presence' | 'chat'
 
-export function RoomSidebar({ peers, messages, onSendMessage }: RoomSidebarProps): JSX.Element {
+export function RoomSidebar({ peers, messages, onSendMessage }: RoomSidebarProps) {
   const [tab, setTab] = useState<Tab>('presence')
   const [draft, setDraft] = useState('')
 
