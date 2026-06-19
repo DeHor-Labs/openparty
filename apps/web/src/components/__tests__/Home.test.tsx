@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Home } from '../Home'
+import { ThemeProvider } from '../../lib/ThemeContext'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -12,17 +13,36 @@ vi.mock('react-router-dom', async () => {
 
 global.fetch = vi.fn()
 
+/** Wrapper que prove ThemeProvider e Router para os testes de Home */
+function renderHome() {
+  return render(
+    <ThemeProvider>
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+}
+
 describe('Home', () => {
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // jsdom nao implementa matchMedia; stub necessario para ThemeProvider
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
   })
 
   it('renderiza os inputs de URL, nickname e avatar', () => {
-    render(<MemoryRouter><Home /></MemoryRouter>)
+    renderHome()
     expect(screen.getByPlaceholderText(/youtube\.com|youtu\.be/i)).toBeDefined()
     expect(screen.getByPlaceholderText(/nickname/i)).toBeDefined()
     expect(screen.getByRole('button', { name: /entrar|criar sala/i })).toBeDefined()
@@ -33,7 +53,7 @@ describe('Home', () => {
       ok: true,
       json: async () => ({ roomId: 'abc123', url: '/room/abc123' }),
     })
-    render(<MemoryRouter><Home /></MemoryRouter>)
+    renderHome()
     fireEvent.change(screen.getByPlaceholderText(/youtube\.com|youtu\.be/i), {
       target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
     })
@@ -58,7 +78,7 @@ describe('Home', () => {
       ok: false,
       json: async () => ({ error: 'URL invalida' }),
     })
-    render(<MemoryRouter><Home /></MemoryRouter>)
+    renderHome()
     fireEvent.change(screen.getByPlaceholderText(/youtube\.com|youtu\.be/i), {
       target: { value: 'nao-e-url' },
     })

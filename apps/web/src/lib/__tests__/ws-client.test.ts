@@ -188,4 +188,93 @@ describe('createWsClient', () => {
     MockWebSocket.lastInstance().simulateOpen()
     expect(client.readyState).toBe(MockWebSocket.OPEN)
   })
+
+  // --- Testes de regressao: handshake de identidade ---
+
+  it('envia handshake como PRIMEIRO frame ao abrir o socket', () => {
+    const hs = { displayName: 'Nikolas', avatar: '🎬' }
+    createWsClient(makeOptions({ handshake: hs }))
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    expect(ws.sentMessages).toHaveLength(1)
+    expect(JSON.parse(ws.sentMessages[0]!)).toEqual(hs)
+  })
+
+  it('envia handshake ANTES de mensagens enfileiradas', () => {
+    const hs = { displayName: 'Nikolas', avatar: '🎬' }
+    const client = createWsClient(makeOptions({ handshake: hs }))
+    const ws = MockWebSocket.lastInstance()
+
+    // Enfileira uma mensagem antes da conexao abrir
+    const msg: ClientEvent = { type: 'chat', text: 'ola' }
+    client.send(msg)
+
+    ws.simulateOpen()
+
+    // Primeiro frame deve ser o handshake, segundo a mensagem enfileirada
+    expect(ws.sentMessages).toHaveLength(2)
+    expect(JSON.parse(ws.sentMessages[0]!)).toEqual(hs)
+    expect(JSON.parse(ws.sentMessages[1]!)).toEqual(msg)
+  })
+
+  it('reenvia handshake em toda reconexao', () => {
+    const hs = { displayName: 'Nikolas', avatar: '🎬' }
+    createWsClient(makeOptions({ handshake: hs, reconnectDelayMs: 100 }))
+
+    // Primeira conexao
+    const ws1 = MockWebSocket.lastInstance()
+    ws1.simulateOpen()
+    expect(JSON.parse(ws1.sentMessages[0]!)).toEqual(hs)
+
+    // Simula queda e espera reconexao
+    ws1.simulateDrop()
+    vi.advanceTimersByTime(100)
+
+    // Segunda conexao (reconexao)
+    const ws2 = MockWebSocket.lastInstance()
+    ws2.simulateOpen()
+
+    // Handshake deve ser reenviado na reconexao
+    expect(ws2.sentMessages).toHaveLength(1)
+    expect(JSON.parse(ws2.sentMessages[0]!)).toEqual(hs)
+  })
+
+  it('aceita handshake como funcao e a chama a cada abertura', () => {
+    let callCount = 0
+    const handshakeFn = () => {
+      callCount++
+      return { displayName: `User-${callCount}`, avatar: '🐼' }
+    }
+
+    createWsClient(makeOptions({ handshake: handshakeFn, reconnectDelayMs: 100 }))
+
+    const ws1 = MockWebSocket.lastInstance()
+    ws1.simulateOpen()
+    expect(callCount).toBe(1)
+    expect(JSON.parse(ws1.sentMessages[0]!)).toEqual({ displayName: 'User-1', avatar: '🐼' })
+
+    ws1.simulateDrop()
+    vi.advanceTimersByTime(100)
+
+    const ws2 = MockWebSocket.lastInstance()
+    ws2.simulateOpen()
+    expect(callCount).toBe(2)
+    expect(JSON.parse(ws2.sentMessages[0]!)).toEqual({ displayName: 'User-2', avatar: '🐼' })
+  })
+
+  it('nao envia handshake quando opcao nao e fornecida', () => {
+    // Sem handshake: comportamento legado, nenhum frame extra no open
+    const client = createWsClient(makeOptions())
+    const ws = MockWebSocket.lastInstance()
+    ws.simulateOpen()
+
+    // Nenhum frame enviado automaticamente (sem handshake configurado)
+    expect(ws.sentMessages).toHaveLength(0)
+
+    // Mas send ainda funciona normalmente
+    const msg: ClientEvent = { type: 'reaction', emoji: '🎉' }
+    client.send(msg)
+    expect(ws.sentMessages).toHaveLength(1)
+  })
 })

@@ -1,6 +1,7 @@
 // apps/web/src/components/Home.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ThemeToggle } from './ThemeToggle'
 
 const AVATAR_OPTIONS = ['🎬', '🍿', '🎮', '🎵', '🦊', '🐻', '🐼', '🦁']
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3000'
@@ -40,6 +41,9 @@ export function Home() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-background p-4">
+      <header className="fixed top-0 right-0 p-3">
+        <ThemeToggle />
+      </header>
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold tracking-tight">OpenParty</h1>

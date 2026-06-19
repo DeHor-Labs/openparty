@@ -6,6 +6,7 @@ import { RoomPlayer } from '../components/room/RoomPlayer'
 import { RoomSidebar } from '../components/room/RoomSidebar'
 import { RoomControls } from '../components/room/RoomControls'
 import { ReactionsLayer } from '../components/room/ReactionsLayer'
+import { ThemeToggle } from '../components/ThemeToggle'
 import type { PlayerAdapter } from '../lib/players/index'
 
 export function RoomPage() {
@@ -52,6 +53,10 @@ export function RoomPage() {
         <div className="relative flex-1">
           <RoomPlayer roomState={roomState} onAdapterReady={handleAdapterReady} />
           <ReactionsLayer reactions={reactions} onReact={sendReaction} />
+          {/* Toggle de tema fixo no canto superior direito da area de video */}
+          <div className="absolute top-2 right-2 z-10">
+            <ThemeToggle />
+          </div>
         </div>
         <RoomControls
           roomState={roomState}

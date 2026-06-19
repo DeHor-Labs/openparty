@@ -172,13 +172,19 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
   }, [])
 
   useEffect(() => {
-    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = typeof window !== 'undefined' ? window.location.host : 'localhost'
-    const wsUrl = `${protocol}://${host}/ws/${roomId}`
+    // Determina a URL do WS:
+    // - Se VITE_SERVER_URL estiver definida (producao/Docker), usa-a como base.
+    // - Sem a env var, cai no proxy Vite (/ws/...) que aponta para localhost:3000.
+    const serverUrl = import.meta.env.VITE_SERVER_URL
+    const wsUrl = serverUrl
+      ? serverUrl.replace(/^http/, 'ws') + '/ws/' + roomId
+      : '/ws/' + roomId
 
     const client = createWsClient({
       url: wsUrl,
       onEvent: handleEvent,
+      // Handshake de identidade reenviado em toda (re)abertura do socket.
+      handshake: { displayName: identity.displayName, avatar: identity.avatar },
       onOpen: () => {
         setConnected(true)
       },

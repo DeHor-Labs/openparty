@@ -1,17 +1,19 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { useRoom } from '../useRoom'
-import type { WsClient } from '../../lib/ws-client'
+import type { WsClient, WsClientOptions } from '../../lib/ws-client'
 import type { ServerEvent, RoomState } from '@openparty/protocol'
 
-// Mock de createWsClient: captura o onEvent para injecao sintetica de eventos
+// Mock de createWsClient: captura opcoes completas para assertivas de regressao
 let capturedOnEvent: ((event: ServerEvent) => void) | null = null
+let capturedOptions: WsClientOptions | null = null
 let mockSend: ReturnType<typeof vi.fn>
 let mockClose: ReturnType<typeof vi.fn>
 
 vi.mock('../../lib/ws-client', () => ({
-  createWsClient: (opts: { onEvent: (e: ServerEvent) => void; onOpen?: () => void }) => {
+  createWsClient: (opts: WsClientOptions) => {
     capturedOnEvent = opts.onEvent
+    capturedOptions = opts
     mockSend = vi.fn()
     mockClose = vi.fn()
     // Simular onOpen imediatamente
@@ -52,6 +54,7 @@ const BASE_ROOM_STATE: RoomState = {
 describe('useRoom', () => {
   beforeEach(() => {
     capturedOnEvent = null
+    capturedOptions = null
   })
 
   afterEach(() => {
@@ -246,5 +249,40 @@ describe('useRoom', () => {
     })
 
     expect(result.current.roomState?.hostId).toBe('user-2')
+  })
+
+  // --- Testes de regressao: handshake e URL ---
+
+  it('passa handshake com displayName e avatar para createWsClient', () => {
+    renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    expect(capturedOptions?.handshake).toEqual({
+      displayName: 'Nikolas',
+      avatar: '🎬',
+    })
+  })
+
+  it('usa caminho relativo /ws/<roomId> quando VITE_SERVER_URL nao esta definida', () => {
+    // Em ambiente de teste, import.meta.env.VITE_SERVER_URL nao esta definida
+    renderHook(() =>
+      useRoom('sala-abc', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    expect(capturedOptions?.url).toBe('/ws/sala-abc')
+  })
+
+  it('usa VITE_SERVER_URL para construir wsUrl quando definida', () => {
+    // vi.stubEnv e a forma correta de sobrescrever env vars no Vitest
+    vi.stubEnv('VITE_SERVER_URL', 'http://server.example.com:3000')
+
+    renderHook(() =>
+      useRoom('sala-xyz', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    expect(capturedOptions?.url).toBe('ws://server.example.com:3000/ws/sala-xyz')
+
+    vi.unstubAllEnvs()
   })
 })

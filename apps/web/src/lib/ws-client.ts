@@ -3,11 +3,22 @@ import type { ClientEvent, ServerEvent } from '@openparty/protocol'
 
 export type EventHandler<T extends ServerEvent> = (event: T) => void
 
+/** Shape do handshake de identidade esperado pelo servidor */
+export interface WsHandshake {
+  displayName: string
+  avatar: string
+}
+
 export interface WsClientOptions {
   url: string
   onEvent: (event: ServerEvent) => void
   onOpen?: () => void
   onClose?: () => void
+  /**
+   * Handshake de identidade enviado como PRIMEIRO frame a cada (re)abertura do socket.
+   * Pode ser um objeto estatico ou uma funcao que retorna o objeto (util para valores reativos).
+   */
+  handshake?: WsHandshake | (() => WsHandshake)
   /** Intervalo base de reconexao em ms; padrao 2000 */
   reconnectDelayMs?: number
 }
@@ -26,6 +37,7 @@ export function createWsClient(options: WsClientOptions): WsClient {
     onEvent,
     onOpen,
     onClose,
+    handshake,
     reconnectDelayMs = 2_000,
   } = options
 
@@ -35,6 +47,12 @@ export function createWsClient(options: WsClientOptions): WsClient {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   const queue: ClientEvent[] = []
 
+  /** Resolve o handshake (suporte a objeto estatico ou funcao) */
+  function resolveHandshake(): WsHandshake | undefined {
+    if (!handshake) return undefined
+    return typeof handshake === 'function' ? handshake() : handshake
+  }
+
   function connect() {
     if (destroyed) return
 
@@ -42,6 +60,13 @@ export function createWsClient(options: WsClientOptions): WsClient {
 
     ws.onopen = () => {
       reconnectAttempt = 0
+
+      // Envia handshake de identidade como PRIMEIRO frame, antes de qualquer outra mensagem.
+      // Isso e obrigatorio em toda (re)conexao: o server descarta frames anteriores ao handshake.
+      const hs = resolveHandshake()
+      if (hs && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(hs))
+      }
 
       // Drena fila de mensagens pendentes
       while (queue.length > 0) {
