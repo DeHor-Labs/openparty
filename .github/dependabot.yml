@@ -1,0 +1,11 @@
+# Rotacao automatica dos SHAs das GitHub Actions.
+# O Dependabot abre PRs semanais propondo atualizacoes de versao/SHA para
+# cada action usada nos workflows, mantendo a supply chain atualizada.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"

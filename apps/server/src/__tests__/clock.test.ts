@@ -19,9 +19,9 @@ describe('handleClockPing', () => {
     }
   })
 
-  it('responde com clock-pong ecoando t1 e registrando t2 e t3', () => {
+  it('responde com clock-pong ecoando t1, t2, t3 e totalPings', () => {
     const before = Date.now()
-    const event: ClockPingEvent = { type: 'clock-ping', t1: 1000 }
+    const event: ClockPingEvent = { type: 'clock-ping', t1: 1000, totalPings: 8 }
 
     handleClockPing(event, mockClient)
 
@@ -36,10 +36,12 @@ describe('handleClockPing', () => {
     expect(pong.t2).toBeLessThanOrEqual(after)
     expect(pong.t3).toBeGreaterThanOrEqual(pong.t2)
     expect(pong.t3).toBeLessThanOrEqual(after)
+    // Servidor deve fazer eco do totalPings enviado pelo cliente
+    expect(pong.totalPings).toBe(8)
   })
 
   it('t2 e t3 refletem timestamps reais do servidor (nao o t1 do cliente)', () => {
-    const event: ClockPingEvent = { type: 'clock-ping', t1: 42 }
+    const event: ClockPingEvent = { type: 'clock-ping', t1: 42, totalPings: 8 }
 
     handleClockPing(event, mockClient)
 
@@ -49,11 +51,21 @@ describe('handleClockPing', () => {
   })
 
   it('t3 e sempre maior ou igual a t2 (envio ocorre apos recepcao)', () => {
-    const event: ClockPingEvent = { type: 'clock-ping', t1: 999 }
+    const event: ClockPingEvent = { type: 'clock-ping', t1: 999, totalPings: 8 }
 
     handleClockPing(event, mockClient)
 
     const pong = mockSend.mock.calls[0][0]
     expect(pong.t3).toBeGreaterThanOrEqual(pong.t2)
+  })
+
+  it('ecoa totalPings=3 na recalibracao (numero de pings diferente da calibracao inicial)', () => {
+    // Garante que o servidor ecoa corretamente totalPings distintos de 8
+    const event: ClockPingEvent = { type: 'clock-ping', t1: 500, totalPings: 3 }
+
+    handleClockPing(event, mockClient)
+
+    const pong = mockSend.mock.calls[0][0]
+    expect(pong.totalPings).toBe(3)
   })
 })

@@ -26,11 +26,12 @@ vi.mock('../../lib/ws-client', () => ({
   },
 }))
 
-// Mock de useClock: retorna serverNow = Date.now(), calibrating=false e onPong como fn
+// Mock de useClock: permite controlar o offset via mockServerNowOffset
+let mockServerNowOffset = 0
 const mockOnPong = vi.fn()
 vi.mock('../useClock', () => ({
   useClock: () => ({
-    serverNow: () => Date.now(),
+    serverNow: () => Date.now() + mockServerNowOffset,
     calibrating: false,
     onPong: mockOnPong,
   }),
@@ -58,6 +59,7 @@ describe('useRoom', () => {
     capturedOnEvent = null
     capturedOptions = null
     mockOnPong.mockClear()
+    mockServerNowOffset = 0
   })
 
   afterEach(() => {
@@ -134,9 +136,11 @@ describe('useRoom', () => {
         t1: 1000,
         t2: 1010,
         t3: 1011,
+        totalPings: 8,
       })
     })
 
+    // totalPings vem do evento (eco do servidor), nao mais hardcoded no useRoom
     expect(mockOnPong).toHaveBeenCalledWith(1000, 1010, 1011, 8)
   })
 
@@ -398,5 +402,39 @@ describe('useRoom', () => {
     expect(capturedOptions?.url).toBe('ws://server.example.com:3000/ws/sala-xyz')
 
     vi.unstubAllEnvs()
+  })
+
+  it('evento seek usa serverNow() (offset NTP) em vez de Date.now() local para lastEventAt', async () => {
+    // BUG: ao receber 'seek', lastEventAt era setado com Date.now() bruto,
+    // ignorando o offset NTP-like calculado por useClock.
+    // FIX: deve usar serverNow() para refletir o relogio sincronizado com o servidor.
+    //
+    // Configuramos mockServerNowOffset = 500ms (cliente esta 500ms atrasado em relacao ao servidor).
+    // Capturamos Date.now() antes e depois do evento seek.
+    // Se o fix estiver correto, lastEventAt deve ser >= localNow + 500.
+    // Se o bug existir, lastEventAt sera proximo de Date.now() sem offset.
+    mockServerNowOffset = 500
+
+    const { result } = renderHook(() =>
+      useRoom('room-1', { displayName: 'Nikolas', avatar: '🎬' })
+    )
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'room-state', ...BASE_ROOM_STATE, peers: [] })
+    })
+
+    const localNowBefore = Date.now()
+
+    await act(async () => {
+      capturedOnEvent?.({ type: 'seek', time: 42 })
+    })
+
+    const localNowAfter = Date.now()
+    const lastEventAt = result.current.roomState?.lastEventAt ?? 0
+
+    // Com o fix: lastEventAt deve estar no intervalo do serverNow (localNow + 500)
+    expect(lastEventAt).toBeGreaterThanOrEqual(localNowBefore + 500)
+    // Nao deve ser muito maior que o intervalo esperado
+    expect(lastEventAt).toBeLessThanOrEqual(localNowAfter + 500 + 50)
   })
 })

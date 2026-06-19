@@ -48,6 +48,9 @@ export function useSync(
           adapter.setPlaybackRate(decision.rate)
           break
         case 'seek':
+          // Reseta a taxa para o valor normal antes do seek, desfazendo
+          // qualquer adjust-rate temporario de ciclos anteriores
+          adapter.setPlaybackRate(roomState.playbackRate)
           adapter.seekTo(decision.targetSecs).catch(() => {
             // erro de seek: proximo tick vai detectar drift e tentar novamente
           })

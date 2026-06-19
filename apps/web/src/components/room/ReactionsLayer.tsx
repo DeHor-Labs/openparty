@@ -1,10 +1,12 @@
 // apps/web/src/components/room/ReactionsLayer.tsx
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactionItem } from '../../hooks/useRoom'
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '👏', '🔥', '💯']
 // Duracao de exibicao de cada emoji flutuante em ms
 const FLOAT_DURATION_MS = 2500
+// Intervalo de limpeza periodica de emojis expirados
+const CLEANUP_INTERVAL_MS = 500
 
 interface FloatingEmoji {
   id: string
@@ -23,10 +25,14 @@ export function ReactionsLayer({ reactions, onReact }: ReactionsLayerProps) {
   // "pule" quando uma nova reaction chega e o array e recalculado.
   const xPositionsRef = useRef<Map<string, number>>(new Map())
 
-  // Converte reactions recentes em emojis flutuantes
-  useEffect(() => {
+  /**
+   * Recalcula quais reactions ainda estao dentro do FLOAT_DURATION_MS.
+   * Envolto em useCallback com deps corretas para evitar closures desatualizadas
+   * e satisfazer exhaustive-deps nos effects que o consomem.
+   */
+  const applyReactions = useCallback((currentReactions: ReactionItem[]) => {
     const now = Date.now()
-    const recent = reactions.filter((r) => now - r.ts < FLOAT_DURATION_MS)
+    const recent = currentReactions.filter((r) => now - r.ts < FLOAT_DURATION_MS)
 
     // Garante posicao x estavel: reutiliza valor ja gerado para ids conhecidos
     const nextMap = new Map<string, number>()
@@ -44,7 +50,20 @@ export function ReactionsLayer({ reactions, onReact }: ReactionsLayerProps) {
         x: xPositionsRef.current.get(r.id)!,
       }))
     )
-  }, [reactions])
+  }, [])
+
+  // Aplica reactions imediatamente ao mudar o array E executa limpeza periodica
+  // de emojis expirados via setInterval, tudo em um unico effect para evitar
+  // janela de closure desatualizada entre dois effects separados.
+  useEffect(() => {
+    applyReactions(reactions)
+
+    const timer = setInterval(() => {
+      applyReactions(reactions)
+    }, CLEANUP_INTERVAL_MS)
+
+    return () => clearInterval(timer)
+  }, [reactions, applyReactions])
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">

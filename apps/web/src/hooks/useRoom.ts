@@ -75,6 +75,12 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
   const { serverNow, onPong } = useClock(wsClient)
   useSync(roomState, adapter, serverNow)
 
+  // Ref para acessar serverNow dentro de callbacks sem re-criar o callback a cada render
+  const serverNowRef = useRef(serverNow)
+  useEffect(() => {
+    serverNowRef.current = serverNow
+  })
+
   const handleEvent = useCallback(
     (event: ServerEvent) => {
       switch (event.type) {
@@ -127,7 +133,7 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
         case 'seek':
           setRoomState((prev) =>
             prev
-              ? { ...prev, positionSecs: event.time, lastEventAt: Date.now() }
+              ? { ...prev, positionSecs: event.time, lastEventAt: serverNowRef.current() }
               : prev
           )
           break
@@ -193,8 +199,10 @@ export function useRoom(roomId: string, identity: RoomIdentity): UseRoomResult {
           break
 
         case 'clock-pong':
-          // Delega para o handler exposto por useClock via retorno do hook
-          onPong(event.t1, event.t2, event.t3, 8)
+          // totalPings vem do servidor (eco do valor enviado pelo cliente no ping).
+          // Elimina o numero magico 8 e funciona corretamente tanto na calibracao
+          // inicial (INITIAL_PINGS) quanto na recalibracao (RECALIBRATE_PINGS).
+          onPong(event.t1, event.t2, event.t3, event.totalPings)
           break
       }
     },

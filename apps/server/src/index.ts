@@ -21,24 +21,53 @@ import {
   isSetHostLockEvent,
 } from '@openparty/protocol'
 import { createRoom, joinRoom, leaveRoom, getRoom, broadcast } from './rooms'
+import { validateHandshake } from './handshake'
 import { handleClockPing } from './handlers/clock'
 import { handleSync } from './handlers/sync'
 import { handleChat, handleReaction } from './handlers/chat'
 import { handleHostLock } from './handlers/host-lock'
+import { applyRateLimit, resetRateLimit } from './rate-limiter'
 
-// Comprimento maximo permitido para displayName e avatar no handshake
-const DISPLAY_NAME_MAX = 64
-const AVATAR_MAX = 16
 const MEDIA_URL_MAX = 2048
 
-function detectMediaType(url: string): 'youtube' | 'mp4' {
-  if (
-    url.includes('youtube.com') ||
-    url.includes('youtu.be') ||
-    /^[A-Za-z0-9_-]{11}$/.test(url)
-  ) {
-    return 'youtube'
+/**
+ * Numero maximo de frames invalidos aceitos por conexao antes de fechar com 1002.
+ * Previne abuso de parsing (loop tight de JSON malformado ou payloads invalidos).
+ * Exportado para uso em testes de integracao.
+ */
+export const MAX_INVALID_FRAMES = 10
+
+/** Padrao de ID do YouTube: 11 caracteres alfanumericos + _ e - */
+const YOUTUBE_ID_REGEX_SERVER = /^[A-Za-z0-9_-]{11}$/
+
+/**
+ * Detecta o tipo de midia pela URL usando match exato de hostname.
+ * Consistente com o cliente (apps/web/src/lib/players/index.ts):
+ * nao usa includes() para evitar falsos positivos como 'evil.com/youtube.com/x'.
+ * Exportado para permitir testes diretos da logica de deteccao.
+ */
+export function detectMediaType(url: string): 'youtube' | 'mp4' {
+  // ID puro de 11 chars (sem protocolo)
+  if (YOUTUBE_ID_REGEX_SERVER.test(url)) return 'youtube'
+
+  try {
+    const parsed = new URL(url)
+    const hostname = parsed.hostname.toLowerCase()
+
+    if (
+      hostname === 'youtu.be' ||
+      hostname === 'youtube.com' ||
+      hostname === 'www.youtube.com' ||
+      hostname === 'm.youtube.com' ||
+      hostname === 'music.youtube.com' ||
+      hostname === 'www.youtube-nocookie.com'
+    ) {
+      return 'youtube'
+    }
+  } catch {
+    // url invalida: tratar como mp4
   }
+
   return 'mp4'
 }
 
@@ -132,6 +161,10 @@ interface WsData {
   roomId: string
   _handshakeDone?: boolean
   _userId?: string
+  /** Identificador unico da conexao para fins de rate limiting */
+  _connId?: string
+  /** Contador de frames invalidos (JSON malformado ou payload nao reconhecido) */
+  _invalidFrames?: number
 }
 
 // Servidor Bun com WebSocket
@@ -184,38 +217,32 @@ if (import.meta.main) {
             typeof raw === 'string' ? raw : new TextDecoder().decode(raw as unknown as Uint8Array)
           )
         } catch {
+          // JSON malformado: incrementa contador de frames invalidos
+          ws.data._invalidFrames = (ws.data._invalidFrames ?? 0) + 1
+          if (ws.data._invalidFrames > MAX_INVALID_FRAMES) {
+            // 1002 = Protocol Error (RFC 6455): cliente excedeu limite de frames invalidos
+            ws.close(1002, 'Muitos frames invalidos')
+          }
           return
         }
 
         // Handshake inicial
         if (!ws.data._handshakeDone) {
-          const h = parsed as Record<string, unknown>
-
-          // displayName: obrigatorio, string, 1..64 chars
-          if (
-            typeof h['displayName'] !== 'string' ||
-            h['displayName'].length < 1 ||
-            h['displayName'].length > DISPLAY_NAME_MAX
-          ) {
-            ws.close(4000, 'handshake invalido')
+          // Delega validacao para handshake.ts (unica fonte de verdade da logica)
+          const validation = validateHandshake(parsed)
+          if (!validation.valid) {
+            // 1008 = Policy Violation (RFC 6455): handshake nao atende ao contrato do protocolo
+            ws.close(validation.closeCode, validation.reason)
             return
           }
 
-          // avatar: opcional, mas se fornecido deve ser string com ate 16 chars
-          const rawAvatar = h['avatar']
-          if (rawAvatar !== undefined && rawAvatar !== null) {
-            if (typeof rawAvatar !== 'string' || rawAvatar.length > AVATAR_MAX) {
-              ws.close(4000, 'handshake invalido')
-              return
-            }
-          }
-
-          const displayName = h['displayName'] as string
-          const avatar = typeof rawAvatar === 'string' ? rawAvatar : '🎬'
+          const { displayName, avatar } = validation.handshake
 
           const userId = nanoid()
           ws.data._userId = userId
+          ws.data._connId = nanoid()
           ws.data._handshakeDone = true
+          ws.data._invalidFrames = 0
 
           try {
             joinRoom(roomId, {
@@ -263,22 +290,51 @@ if (import.meta.main) {
           return
         }
 
-        if (!isClientEvent(parsed)) return
+        if (!isClientEvent(parsed)) {
+          // Payload pos-handshake nao reconhecido: incrementa contador de frames invalidos
+          ws.data._invalidFrames = (ws.data._invalidFrames ?? 0) + 1
+          if (ws.data._invalidFrames > MAX_INVALID_FRAMES) {
+            ws.close(1002, 'Muitos frames invalidos')
+          }
+          return
+        }
         const event = parsed as ClientEvent
         const userId = ws.data._userId!
+        const connId = ws.data._connId!
+        const agora = Date.now()
 
         if (isClockPingEvent(event)) {
-          const room = getRoom(roomId)
-          const client = room?.clients.get(userId)
-          if (client) handleClockPing(event, client)
-        } else if (isPlayClientEvent(event) || isPauseClientEvent(event) || isSeekClientEvent(event)) {
-          handleSync(event, roomId, userId)
+          // Rate limit generoso para clock-ping: pings sao frequentes mas nao ilimitados
+          if (applyRateLimit(connId, 'clock-ping', agora)) {
+            const room = getRoom(roomId)
+            const client = room?.clients.get(userId)
+            if (client) handleClockPing(event, client)
+          }
+        } else if (isSeekClientEvent(event)) {
+          // Rate limit para seek: descarta silenciosamente se excedido
+          if (applyRateLimit(connId, 'seek', agora)) {
+            handleSync(event, roomId, userId)
+          }
+        } else if (isPlayClientEvent(event) || isPauseClientEvent(event)) {
+          // Rate limit unificado para playback: evita bypass alternando play <-> pause
+          if (applyRateLimit(connId, 'playback', agora)) {
+            handleSync(event, roomId, userId)
+          }
         } else if (isChatClientEvent(event)) {
-          handleChat(event, roomId, userId)
+          // Rate limit para chat: descarta silenciosamente se excedido
+          if (applyRateLimit(connId, 'chat', agora)) {
+            handleChat(event, roomId, userId)
+          }
         } else if (isReactionClientEvent(event)) {
-          handleReaction(event, roomId, userId)
+          // Rate limit para reacao: descarta silenciosamente se excedido
+          if (applyRateLimit(connId, 'reaction', agora)) {
+            handleReaction(event, roomId, userId)
+          }
         } else if (isSetHostLockEvent(event)) {
-          handleHostLock(event, roomId, userId)
+          // Rate limit para host-lock: broadcast amplifica para N clientes
+          if (applyRateLimit(connId, 'host-lock', agora)) {
+            handleHostLock(event, roomId, userId)
+          }
         } else if (isBufferingStartEvent(event) || isBufferingEndEvent(event)) {
           // fase 2: implementar buffering wait-gate
         }
@@ -287,7 +343,13 @@ if (import.meta.main) {
         const { roomId } = ws.data
         if (ws.data._handshakeDone && ws.data._userId) {
           leaveRoom(roomId, ws.data._userId)
+          // Libera o contador de rate limiting da conexao encerrada
+          if (ws.data._connId) {
+            resetRateLimit(ws.data._connId)
+          }
         }
+        // Limpa o contador de frames invalidos
+        ws.data._invalidFrames = 0
       },
     },
   })

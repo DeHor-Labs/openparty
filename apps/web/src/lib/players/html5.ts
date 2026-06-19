@@ -65,6 +65,7 @@ export function createHtml5Adapter(element: HTMLVideoElement): PlayerAdapter {
       return Promise.resolve()
     },
     getCurrentTime: () => element.currentTime,
+    getDuration: () => element.duration || 0,
     setPlaybackRate: (rate: number) => {
       element.playbackRate = rate
     },

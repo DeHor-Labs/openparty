@@ -38,4 +38,27 @@ describe('detectMediaType', () => {
   it('retorna mp4 para URL nao reconhecida como fallback', () => {
     expect(detectMediaType('https://example.com/video')).toBe('mp4')
   })
+
+  it('nao confunde "notyoutube.com" com youtube (match deve ser exato)', () => {
+    // BUG: hostname.includes('youtube.com') casa 'notyoutube.com' como YouTube
+    // FIX: deve casar apenas youtu.be, youtube.com, www.youtube.com, m.youtube.com
+    expect(detectMediaType('https://notyoutube.com/watch?v=dQw4w9WgXcQ')).toBe('mp4')
+  })
+
+  it('aceita m.youtube.com como YouTube', () => {
+    expect(detectMediaType('https://m.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('youtube')
+  })
+
+  it('nao confunde "fakeyoutu.be" com youtu.be (match exato do hostname)', () => {
+    expect(detectMediaType('https://fakeyoutu.be/dQw4w9WgXcQ')).toBe('mp4')
+  })
+
+  // Novos hostnames espelhados do servidor (item 10)
+  it('detecta music.youtube.com como YouTube', () => {
+    expect(detectMediaType('https://music.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('youtube')
+  })
+
+  it('detecta www.youtube-nocookie.com como YouTube', () => {
+    expect(detectMediaType('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')).toBe('youtube')
+  })
 })

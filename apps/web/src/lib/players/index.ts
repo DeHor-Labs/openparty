@@ -19,6 +19,11 @@ export interface PlayerAdapter {
   seekTo(secs: number): Promise<void>
   /** Retorna posicao atual em segundos */
   getCurrentTime(): number
+  /**
+   * Retorna a duracao total do video em segundos.
+   * Pode retornar 0 antes do video estar pronto.
+   */
+  getDuration(): number
   /** Define taxa de reproducao; no YouTube usa o valor discreto mais proximo */
   setPlaybackRate(rate: number): void
   /** Registra listener para evento do player */
@@ -45,8 +50,19 @@ export function detectMediaType(url: string): MediaType {
     const parsed = new URL(url)
     const hostname = parsed.hostname.toLowerCase()
 
+    // Match exato de hostname: nao usar includes() para evitar falsos positivos
+    // como 'notyoutube.com' ou 'fakeyoutu.be'.
+    // Lista espelhada com o servidor (apps/server/src/index.ts detectMediaType).
     if (hostname === 'youtu.be') return 'youtube'
-    if (hostname.includes('youtube.com')) return 'youtube'
+    if (
+      hostname === 'youtube.com' ||
+      hostname === 'www.youtube.com' ||
+      hostname === 'm.youtube.com' ||
+      hostname === 'music.youtube.com' ||
+      hostname === 'www.youtube-nocookie.com'
+    ) {
+      return 'youtube'
+    }
   } catch {
     // url invalida ou relativa: tratar como mp4
   }
