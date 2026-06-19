@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenParty</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        min-width: 300px;
+        padding: 16px;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        color: #1a1a1a;
+        background: #fff;
+      }
+
+      h1 {
+        font-size: 18px;
+        font-weight: 700;
+        color: #7c3aed;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .secao {
+        margin-bottom: 12px;
+      }
+
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        color: #6b7280;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      input[type="text"]:focus {
+        border-color: #7c3aed;
+      }
+
+      .btn-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      button {
+        flex: 1;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, opacity 0.15s;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .btn-primario {
+        background: #7c3aed;
+        color: #fff;
+      }
+
+      .btn-primario:hover:not(:disabled) {
+        background: #6d28d9;
+      }
+
+      .btn-secundario {
+        background: #f3f4f6;
+        color: #374151;
+      }
+
+      .btn-secundario:hover:not(:disabled) {
+        background: #e5e7eb;
+      }
+
+      .btn-perigo {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .btn-perigo:hover:not(:disabled) {
+        background: #fecaca;
+      }
+
+      .divisor {
+        border: none;
+        border-top: 1px solid #e5e7eb;
+        margin: 12px 0;
+      }
+
+      .status-linha {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #6b7280;
+        margin-bottom: 8px;
+      }
+
+      .link-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .link-row input {
+        flex: 1;
+        font-size: 12px;
+        color: #374151;
+        background: #f9fafb;
+      }
+
+      .mensagem-erro {
+        display: none;
+        background: #fee2e2;
+        color: #991b1b;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>
+      <span aria-hidden="true">🎬</span>
+      OpenParty
+    </h1>
+
+    <!-- Tela de entrada (sem sala ativa) -->
+    <div id="tela-entrada">
+      <div class="secao">
+        <button id="btn-criar" class="btn-primario" type="button">
+          Criar nova sala
+        </button>
+      </div>
+
+      <hr class="divisor" aria-hidden="true" />
+
+      <div class="secao">
+        <label for="input-link">Entrar com link ou codigo</label>
+        <input
+          id="input-link"
+          type="text"
+          placeholder="https://openparty.app/join/... ou codigo"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="btn-row">
+          <button id="btn-entrar" class="btn-secundario" type="button">Entrar</button>
+        </div>
+      </div>
+
+      <div id="mensagem-erro" class="mensagem-erro" role="alert" aria-live="polite"></div>
+    </div>
+
+    <!-- Tela de sala ativa -->
+    <div id="tela-sala" style="display: none">
+      <div class="status-linha">
+        <span id="status-ws">🟡 Conectando...</span>
+        <span id="contagem-peers">0 participantes</span>
+      </div>
+
+      <div class="secao">
+        <label for="link-convite">Link de convite</label>
+        <div class="link-row">
+          <input
+            id="link-convite"
+            type="text"
+            readonly
+            aria-label="Link de convite da sala"
+          />
+          <button id="btn-copiar" class="btn-secundario" type="button">Copiar</button>
+        </div>
+      </div>
+
+      <hr class="divisor" aria-hidden="true" />
+
+      <button id="btn-sair" class="btn-perigo" type="button">Sair da sala</button>
+    </div>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
