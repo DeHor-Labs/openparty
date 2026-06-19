@@ -16,8 +16,8 @@ vi.mock('../../lib/ws-client', () => ({
     capturedOptions = opts
     mockSend = vi.fn()
     mockClose = vi.fn()
-    // Simular onOpen imediatamente
-    setTimeout(() => opts.onOpen?.(), 0)
+    // Simular onOpen de forma sincrona para evitar tasks pendentes apos teardown
+    opts.onOpen?.()
     return {
       send: mockSend,
       close: mockClose,
