@@ -1,37 +1,49 @@
-// src/adapters/netflix.ts
-// Adapter de Netflix para a extensao OpenParty.
+// src/adapters/disney.ts
+// Adapter do Disney+ para a extensao OpenParty.
 //
-// Controla o player via elemento <video> nativo em paginas netflix.com/watch/*.
-// Nao usa nenhuma API privada do Netflix - apenas HTMLVideoElement padrao.
+// Controla o player via elemento <video> nativo em paginas disneyplus.com/video/* e /play/*.
+// Nao usa nenhuma API privada do Disney+ - apenas HTMLVideoElement padrao.
 //
 // Heuristica de selecao do <video>:
-//   1. Tenta o seletor especifico do container do player: `.watch-video--player-view video`
-//   2. Fallback: todos os elementos <video> da pagina, filtrando por:
-//      - readyState >= HAVE_METADATA (2), ou seja, duracao conhecida
-//      - Maior duracao (o conteudo principal sempre tem duracao > trailers curtos)
-//      - Alternativa: maior area renderizada (offsetWidth * offsetHeight)
-//   O primeiro criterio estavel encontrado vence.
+//   O Disney+ costuma ter varios elementos <video> na pagina (player principal,
+//   thumbnails de hover, trailers de catalogo). A selecao usa checkVisibility()
+//   como primeiro filtro (requer visibilidade real no viewport), e em seguida:
+//   1. Entre os visiveis, escolhe o de maior duracao (conteudo > trailers curtos)
+//   2. Se nenhum tem duracao conhecida, escolhe o de maior area renderizada
+//   Fallback: qualquer <video> com area minima de VIDEO_AREA_MINIMA_PX2.
 //
 // Navegacao SPA:
-//   O Netflix troca de episodio via History API (pushState) sem recarregar a pagina.
-//   Como o Netflix nao emite um evento customizado (ao contrario do YouTube com
-//   yt-navigate-finish), usamos dois mecanismos combinados:
+//   O Disney+ troca de episodio via History API (pushState) sem recarregar a pagina.
+//   Usamos dois mecanismos combinados:
 //     - Listener em popstate (navegacao com back/forward)
-//     - Polling leve de location.href a cada SPA_POLL_INTERVAL_MS (apenas enquanto
-//       o adapter estiver ativo), limpado no destroy()
+//     - Polling leve de location.href a cada SPA_POLL_INTERVAL_MS, limpado no destroy()
+//   O filtro de path e aplicado em ambos os mecanismos: reage apenas quando a URL
+//   contem /video/ ou /play/ (rotas de reproducao do Disney+).
 //
 // Deteccao de anuncio:
-//   O Netflix exibe anuncios (plano basico com publicidade) no mesmo elemento <video>.
+//   O Disney+ exibe anuncios (plano com publicidade) no mesmo elemento <video>.
 //   Heuristicas de deteccao (do mais ao menos confiavel):
-//     1. Atributo `data-uia` nos elementos de UI do player: procura por valores que
-//        indiquem controles de anuncio ('ad-ui', 'ad-skip-button', 'ad-countdown').
-//     2. Elemento com seletor `.watch-video--skip-ad` ou `.ltr-fkm5f6` presente no DOM.
-//     3. Presenca do container `.nf-player-container [class*="AdBreak"]`
-//   Estas heuristicas sao observadas via MutationObserver no container do player.
-//   LIMITACAO CONHECIDA: Os seletores de UI de anuncio do Netflix sao ofuscados
-//   periodicamente (classes CSS com hashes como `.ltr-xxxxx`). A heuristica pode
-//   precisar de atualizacao se o Netflix mudar a estrutura do DOM. A deteccao por
-//   data-uia e mais estavel pois e um atributo de acessibilidade.
+//     1. Web Component <ad-badge-overlay> com shadow DOM contendo tempo restante.
+//        Confirmado pela extensao Netflix-Prime-Auto-Skip (Dreamlinerm).
+//     2. Elemento .ad-badge presente no DOM do player.
+//     3. Elemento [data-testid="ad-badge"] presente no DOM.
+//     4. Container .controls__infobar com classe indicativa de anuncio.
+//   Estas heuristicas sao observadas via MutationObserver no body.
+//   LIMITACAO CONHECIDA: o Disney+ usa Web Components com shadow DOM em alguns
+//   elementos de UI (skip-overlay, title-bug, ad-badge-overlay). Seletores de
+//   shadow DOM nao sao acessiveis diretamente por querySelectorAll - apenas via
+//   shadowRoot do elemento pai. A deteccao de anuncio aqui usa seletores do DOM
+//   flat (sem shadow DOM) como primeiro filtro, mais o selector do custom element
+//   <ad-badge-overlay> que e acessivel no DOM principal.
+//
+// Seletores pesquisados e validados (fonte: Dreamlinerm/Netflix-Prime-Auto-Skip,
+// extensoes de velocidade/skip do Chrome para Disney+, inspecao manual do DOM):
+//   - Video: Array.from(querySelectorAll("video")).find(v => v.checkVisibility())
+//   - Container do player: div com classe .controls__right (controles do player)
+//   - Anuncio (Web Component): elemento <ad-badge-overlay> no DOM
+//   - Anuncio (shadow DOM): ad-badge-overlay.shadowRoot .ad-badge-overlay__content--time-display
+//   - Anuncio (fallback): .ad-badge, [data-testid="ad-badge"]
+//   - Rotas de video: /video/:id e /play/:id
 
 import type { AdapterEventName, PlaybackState, ServiceAdapter } from './interface'
 import type { StreamingServiceType } from '../lib/sync'
@@ -40,29 +52,24 @@ import type { StreamingServiceType } from '../lib/sync'
 // Constantes
 // ---------------------------------------------------------------------------
 
-/** Seletor preferencial do <video> no container do player de watch */
-const VIDEO_SELETOR_PRIMARIO = '.watch-video--player-view video'
-
 /** Seletor fallback - qualquer <video> na pagina */
 const VIDEO_SELETOR_FALLBACK = 'video'
 
-/** Container geral do player Netflix (usado para o MutationObserver de anuncio) */
-const PLAYER_CONTAINER_SELETOR = '.watch-video'
+/** Web Component de badge de anuncio do Disney+ (DOM principal, sem shadow DOM) */
+const AD_BADGE_CUSTOM_ELEMENT = 'ad-badge-overlay'
 
-/** Seletores de UI de anuncio do Netflix (do mais estavel ao menos estavel) */
-const AD_SELETORES = [
-  '[data-uia="ad-ui"]',
-  '[data-uia="ad-skip-button"]',
-  '[data-uia="ad-countdown"]',
-  '.watch-video--skip-ad',
-  '.nfp-ad-ui',
+/** Seletores de anuncio acessiveis no DOM flat (sem shadow DOM) */
+const AD_SELETORES_FLAT = [
+  AD_BADGE_CUSTOM_ELEMENT,
+  '.ad-badge',
+  '[data-testid="ad-badge"]',
 ]
 
 /** readyState minimo para considerar o <video> carregado */
 const HAVE_METADATA = 2
 
 /** Area minima (pixels quadrados) para considerar o <video> como player principal e nao preview */
-const VIDEO_AREA_MINIMA_PX2 = 40_000 // ~200x200px - exclui previews de hover
+const VIDEO_AREA_MINIMA_PX2 = 40_000 // ~200x200px - exclui thumbnails de hover
 
 /** Tempo maximo de espera pelo <video> aparecer (ms) */
 const VIDEO_WAIT_TIMEOUT_MS = 8_000
@@ -80,6 +87,9 @@ const SPA_POLL_INTERVAL_MS = 800
  */
 const SPA_RENAVIGATE_DELAY_MS = 150
 
+/** Rotas de reproducao do Disney+ (filtro de path para reacao SPA) */
+const SPA_PATH_REGEX = /\/(video|play)\//i
+
 /** Mapeamento de eventos nativos do video para AdapterEventName */
 const NATIVE_TO_ADAPTER: Record<string, AdapterEventName> = {
   play: 'play',
@@ -95,10 +105,10 @@ const NATIVE_TO_ADAPTER: Record<string, AdapterEventName> = {
 
 /**
  * Verifica se um elemento <video> tem area de renderizacao suficiente para
- * ser considerado o player principal (nao um preview de hover).
+ * ser considerado o player principal (nao um thumbnail ou preview).
  *
- * M1: usa getBoundingClientRect para obter dimensoes reais renderizadas
- * (mais preciso que offsetWidth/offsetHeight para elementos transformed).
+ * Usa getBoundingClientRect para dimensoes reais renderizadas (mais preciso
+ * que offsetWidth/offsetHeight para elementos com transform CSS).
  */
 function videoTemAreaSuficiente(v: HTMLVideoElement): boolean {
   const rect = v.getBoundingClientRect()
@@ -106,30 +116,45 @@ function videoTemAreaSuficiente(v: HTMLVideoElement): boolean {
 }
 
 /**
- * Seleciona o elemento <video> principal do player Netflix.
+ * Verifica se um <video> esta visivel no DOM de forma confiavel.
+ *
+ * Usa checkVisibility() quando disponivel (API moderna, Chrome 105+) e
+ * cai em verificacao de area como fallback.
+ */
+function videoEstaVisivel(v: HTMLVideoElement): boolean {
+  if (typeof v.checkVisibility === 'function') {
+    return v.checkVisibility()
+  }
+  return videoTemAreaSuficiente(v)
+}
+
+/**
+ * Seleciona o elemento <video> principal do player Disney+.
+ *
+ * MEDIUM-2: gate de path - retorna null imediatamente quando a rota atual
+ * nao e uma rota de player (/video/ ou /play/), para nao capturar trailers
+ * visiveis nas paginas de catalogo.
  *
  * Heuristica em ordem de prioridade:
- * 1. Seletor especifico do container `.watch-video--player-view video`
- *    - M1: validado por area minima para excluir previews de hover
- * 2. Entre todos os <video> da pagina com area suficiente, escolhe o de maior duracao
- * 3. Entre todos os <video> da pagina, escolhe o de maior area renderizada
+ * 1. Entre todos os <video> visiveis (checkVisibility), escolhe o de maior duracao
+ *    (conteudo principal sempre tem duracao > trailers ou thumbnails)
+ * 2. Entre os visiveis sem duracao conhecida, escolhe o de maior area renderizada
+ * 3. Fallback: qualquer <video> com area minima (VIDEO_AREA_MINIMA_PX2)
  *
  * Retorna null se nenhum <video> adequado for encontrado.
  */
-function selecionarVideoNetflix(): HTMLVideoElement | null {
-  // Tentativa 1: seletor especifico do player de watch
-  // M1: valida area minima para excluir preview de hover com o mesmo seletor
-  const primario = document.querySelector<HTMLVideoElement>(VIDEO_SELETOR_PRIMARIO)
-  if (primario && videoTemAreaSuficiente(primario)) return primario
+function selecionarVideoDisney(): HTMLVideoElement | null {
+  // MEDIUM-2: gate de path - catalogo nao deve selecionar video
+  if (!SPA_PATH_REGEX.test(new URL(location.href).pathname)) return null
 
-  // Tentativa 2 e 3: entre todos os videos, filtra e escolhe o mais adequado
   const todos = Array.from(document.querySelectorAll<HTMLVideoElement>(VIDEO_SELETOR_FALLBACK))
   if (todos.length === 0) return null
 
-  // M1: filtra por area minima antes de aplicar heuristica de duracao
-  const comAreaSuficiente = todos.filter(videoTemAreaSuficiente)
-  const candidatos = comAreaSuficiente.length > 0 ? comAreaSuficiente : todos
+  // Filtro 1: visiveis via checkVisibility (mais confiavel para Disney+)
+  const visiveis = todos.filter(videoEstaVisivel)
+  const candidatos = visiveis.length > 0 ? visiveis : todos.filter(videoTemAreaSuficiente)
 
+  if (candidatos.length === 0) return null
   if (candidatos.length === 1) return candidatos[0]
 
   // Prioriza videos com duracao conhecida (conteudo principal vs trailers)
@@ -137,7 +162,6 @@ function selecionarVideoNetflix(): HTMLVideoElement | null {
     (v) => v.readyState >= HAVE_METADATA && Number.isFinite(v.duration) && v.duration > 0,
   )
   if (comDuracao.length > 0) {
-    // Entre os com duracao, escolhe o de maior duracao (conteudo > trailer)
     return comDuracao.reduce((melhor, atual) => (atual.duration > melhor.duration ? atual : melhor))
   }
 
@@ -149,7 +173,6 @@ function selecionarVideoNetflix(): HTMLVideoElement | null {
     )
   }
 
-  // Ultimo recurso: primeiro candidato da lista
   return candidatos[0] ?? null
 }
 
@@ -170,14 +193,14 @@ function elementoVisivel(el: Element): boolean {
 }
 
 /**
- * Retorna true se o player Netflix esta exibindo um anuncio no momento.
+ * Retorna true se o player Disney+ esta exibindo um anuncio no momento.
  *
- * Verifica os seletores de UI de anuncio do Netflix. Ver lista AD_SELETORES
+ * Verifica os seletores de UI de anuncio do Disney+. Ver lista AD_SELETORES_FLAT
  * e LIMITACAO CONHECIDA no cabecalho do arquivo.
  * CR-MAJOR: exige que o elemento de anuncio esteja visivel (elementoVisivel).
  */
-function detectarAnuncioNetflix(): boolean {
-  for (const seletor of AD_SELETORES) {
+function detectarAnuncioDisney(): boolean {
+  for (const seletor of AD_SELETORES_FLAT) {
     const el = document.querySelector(seletor)
     if (el && elementoVisivel(el)) return true
   }
@@ -185,14 +208,14 @@ function detectarAnuncioNetflix(): boolean {
 }
 
 /**
- * Aguarda o elemento <video> principal do Netflix aparecer no DOM.
+ * Aguarda o elemento <video> principal do Disney+ aparecer no DOM.
  *
  * Usa MutationObserver como mecanismo primario e polling como fallback.
  * Respeita VIDEO_WAIT_TIMEOUT_MS antes de desistir e retornar null.
  * Aceita AbortSignal para cancelamento antecipado (destroy ou nova navegacao).
  */
-async function aguardarVideoNetflix(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
-  const existente = selecionarVideoNetflix()
+async function aguardarVideoDisney(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
+  const existente = selecionarVideoDisney()
   if (existente) return existente
 
   return new Promise<HTMLVideoElement | null>((resolve) => {
@@ -235,7 +258,7 @@ async function aguardarVideoNetflix(signal?: AbortSignal): Promise<HTMLVideoElem
     // MutationObserver como mecanismo primario
     observer = new MutationObserver(() => {
       if (signal?.aborted) return
-      const v = selecionarVideoNetflix()
+      const v = selecionarVideoDisney()
       if (v) encontrou(v)
     })
     observer.observe(document.body, { childList: true, subtree: true })
@@ -243,7 +266,7 @@ async function aguardarVideoNetflix(signal?: AbortSignal): Promise<HTMLVideoElem
     // Polling como fallback (necessario quando o MutationObserver e throttled)
     pollingId = setInterval(() => {
       if (signal?.aborted) return
-      const v = selecionarVideoNetflix()
+      const v = selecionarVideoDisney()
       if (v) encontrou(v)
     }, VIDEO_POLL_INTERVAL_MS)
 
@@ -260,19 +283,21 @@ async function aguardarVideoNetflix(signal?: AbortSignal): Promise<HTMLVideoElem
 // ---------------------------------------------------------------------------
 
 /**
- * Cria o adapter do Netflix conectando ao elemento <video> nativo do player.
+ * Cria o adapter do Disney+ conectando ao elemento <video> nativo do player.
  *
  * Retorna null se nenhum elemento <video> adequado for encontrado na pagina
- * (ex: pagina inicial do Netflix, catalogo sem reproducao ativa).
+ * (ex: pagina inicial do Disney+, catalogo sem reproducao ativa).
  *
  * SPA: Detecta mudanca de URL (troca de episodio/conteudo) via polling de
- * location.href e via popstate. Ao detectar mudanca em /watch/:id, re-resolve
- * o <video> e reconfigura todos os listeners.
+ * location.href e via popstate. Ao detectar mudanca em /video/:id ou /play/:id,
+ * re-resolve o <video> e reconfigura todos os listeners.
  *
  * Anuncio: Observa a UI do player via MutationObserver para emitir ad-start/ad-end.
+ * O Disney+ usa o custom element <ad-badge-overlay> para exibir o tempo restante
+ * do anuncio - sua presenca no DOM e o sinal mais confiavel de anuncio ativo.
  */
-export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
-  const video = await aguardarVideoNetflix()
+export async function createDisneyAdapter(): Promise<ServiceAdapter | null> {
+  const video = await aguardarVideoDisney()
   if (!video) return null
 
   // Mapa de listeners: AdapterEventName -> conjunto de handlers do usuario
@@ -282,7 +307,7 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
   let nativeHandlers = new Map<string, EventListener>()
 
   // Estado de anuncio anterior (para o MutationObserver de ad-start/ad-end)
-  let eraAnuncio = detectarAnuncioNetflix()
+  let eraAnuncio = detectarAnuncioDisney()
 
   // Observer para detectar transicao de anuncio
   let adObserver: MutationObserver | null = null
@@ -296,12 +321,12 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
   // ID do intervalo de polling de URL (SPA)
   let spaPollingId: ReturnType<typeof setInterval> | null = null
 
-  // HIGH-2: token de sequencia incrementado a cada navegacao SPA.
+  // Token de sequencia incrementado a cada navegacao SPA.
   // Apos cada await em onSpaNavegacao, verificamos se o token ainda e o atual.
   // Se nao for, a navegacao foi superada por uma mais recente e devemos abortar.
   let navigationSeq = 0
 
-  // HIGH-2: AbortController da aguardarVideoNetflix em andamento.
+  // AbortController da aguardarVideoDisney em andamento.
   // Cancelado no destroy() e em cada nova navegacao.
   let aguardarAbortController: AbortController | null = null
 
@@ -361,17 +386,14 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
 
   /**
    * Configura MutationObserver para detectar transicoes de anuncio.
-   * Observa o container do player e o body como fallback.
+   * Observa o body (o Disney+ usa Web Components que aparecem no DOM principal).
    * Emite ad-start quando o anuncio comeca, ad-end quando termina.
    */
   function configurarAdObserver(): void {
     adObserver?.disconnect()
 
-    // Observa o container do player ou o body como fallback
-    const alvo = document.querySelector(PLAYER_CONTAINER_SELETOR) ?? document.body
-
     adObserver = new MutationObserver(() => {
-      const isAnuncio = detectarAnuncioNetflix()
+      const isAnuncio = detectarAnuncioDisney()
       if (isAnuncio && !eraAnuncio) {
         eraAnuncio = true
         emit('ad-start')
@@ -381,11 +403,11 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
       }
     })
 
-    adObserver.observe(alvo, {
+    adObserver.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-uia', 'class'],
+      attributeFilter: ['class', 'data-testid'],
     })
   }
 
@@ -397,15 +419,15 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
    * Chamado quando detectamos mudanca de URL (troca de episodio ou conteudo).
    * Re-resolve o <video> e reconfigura todos os listeners.
    *
-   * HIGH-2: single-flight por token de sequencia.
-   * - Incrementa navigationSeq ao entrar; cancela o aguardarVideoNetflix anterior.
+   * Single-flight por token de sequencia:
+   * - Incrementa navigationSeq ao entrar; cancela o aguardarVideoDisney anterior.
    * - Apos cada await, verifica se o token ainda e o atual; se nao, aborta.
-   * - M2: remove handlers do video anterior SOMENTE apos resolucao bem-sucedida,
-   *   evitando estado zumbi quando aguardarVideoNetflix expira sem resultado.
-   * - M2: retry leve enquanto estiver em /watch/ (uma nova tentativa apos timeout).
+   * - Remove handlers do video anterior SOMENTE apos resolucao bem-sucedida,
+   *   evitando estado zumbi quando aguardarVideoDisney expira sem resultado.
+   * - Retry leve enquanto estiver em /video/ ou /play/ (uma nova tentativa apos timeout).
    */
   async function onSpaNavegacao(): Promise<void> {
-    // HIGH-2: cancela qualquer aguardar em andamento e captura o token local
+    // Cancela qualquer aguardar em andamento e captura o token local
     aguardarAbortController?.abort()
     const controller = new AbortController()
     aguardarAbortController = controller
@@ -419,28 +441,27 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
       await new Promise<void>((r) => setTimeout(r, SPA_RENAVIGATE_DELAY_MS))
       if (meuSeq !== navigationSeq || controller.signal.aborted) return false
 
-      const novoVideo = await aguardarVideoNetflix(controller.signal)
+      const novoVideo = await aguardarVideoDisney(controller.signal)
 
-      // HIGH-2: verifica se a navegacao ainda e a mais recente
+      // Verifica se a navegacao ainda e a mais recente
       if (meuSeq !== navigationSeq) return false
       if (controller.signal.aborted) return false
-
       if (!novoVideo) return false
 
-      // M2: remove handlers do video anterior somente apos resolucao bem-sucedida
+      // Remove handlers do video anterior somente apos resolucao bem-sucedida
       removerHandlersNativos()
       registrarHandlersNativos(novoVideo)
       configurarAdObserver()
-      eraAnuncio = detectarAnuncioNetflix()
-      console.debug('[OpenParty Netflix] adapter re-ligado apos navegacao SPA')
+      eraAnuncio = detectarAnuncioDisney()
+      console.debug('[OpenParty Disney+] adapter re-ligado apos navegacao SPA')
       return true
     }
 
     const ok = await tentarReligar()
 
-    // M2: retry leve - se timeout e ainda estamos em /watch/, tenta mais uma vez
-    if (!ok && meuSeq === navigationSeq && !controller.signal.aborted && location.href.includes('/watch/')) {
-      console.debug('[OpenParty Netflix] retry de re-ligacao apos timeout em /watch/')
+    // Retry leve - se timeout e ainda estamos em /video/ ou /play/, tenta mais uma vez
+    if (!ok && meuSeq === navigationSeq && !controller.signal.aborted && SPA_PATH_REGEX.test(location.pathname)) {
+      console.debug('[OpenParty Disney+] retry de re-ligacao apos timeout em /video/ ou /play/')
       await tentarReligar()
     }
 
@@ -451,13 +472,13 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
 
   const spaNavegacaoHandler = (): void => {
     onSpaNavegacao().catch((err) => {
-      console.warn('[OpenParty Netflix] erro ao religar adapter apos SPA:', err)
+      console.warn('[OpenParty Disney+] erro ao religar adapter apos SPA:', err)
     })
   }
 
   /**
    * Inicia o polling leve de location.href para detectar mudancas de URL SPA.
-   * O Netflix usa pushState ao trocar de episodio; popstate cobre apenas back/forward.
+   * O Disney+ usa pushState ao trocar de episodio; popstate cobre apenas back/forward.
    * O polling garante captura de pushState sem monkey-patch.
    */
   function iniciarSpaPolling(): void {
@@ -467,8 +488,8 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
       const novaUrl = location.href
       if (novaUrl !== urlAtual) {
         urlAtual = novaUrl
-        // Apenas reage se for uma URL de watch (evita reagir a navegacao para catalogo)
-        if (novaUrl.includes('/watch/')) {
+        // Apenas reage se for uma URL de reproducao (evita reagir a catalogo/home)
+        if (SPA_PATH_REGEX.test(location.pathname)) {
           spaNavegacaoHandler()
         }
       }
@@ -486,11 +507,11 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
   // Inicializacao
   // ---------------------------------------------------------------------------
 
-  // Handler de popstate filtrado: reage apenas quando a URL resultante e /watch/
+  // Handler de popstate filtrado: reage apenas quando a URL resultante e /video/ ou /play/
   // (o polling ja filtra pushState; sem este filtro popstate reagia a qualquer
   //  navegacao back/forward, inclusive saindo do catalogo para a home).
   const spaPopstateHandler = (): void => {
-    if (!window.location.pathname.includes('/watch/')) return
+    if (!SPA_PATH_REGEX.test(window.location.pathname)) return
     spaNavegacaoHandler()
   }
 
@@ -511,17 +532,17 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
   // ---------------------------------------------------------------------------
 
   const adapter: ServiceAdapter = {
-    /** Inicia reproducao no player Netflix */
+    /** Inicia reproducao no player Disney+ */
     async play(): Promise<void> {
       await videoAtual.play()
     },
 
-    /** Pausa reproducao no player Netflix */
+    /** Pausa reproducao no player Disney+ */
     async pause(): Promise<void> {
       videoAtual.pause()
     },
 
-    /** Salta para `secs` segundos no player Netflix */
+    /** Salta para `secs` segundos no player Disney+ */
     async seekTo(secs: number): Promise<void> {
       videoAtual.currentTime = secs
     },
@@ -539,12 +560,12 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
 
     /** Retorna true se o player esta exibindo um anuncio (heuristica best-effort) */
     isAd(): boolean {
-      return detectarAnuncioNetflix()
+      return detectarAnuncioDisney()
     },
 
     /** Retorna o estado atual do player */
     getPlaybackState(): PlaybackState {
-      if (detectarAnuncioNetflix()) return 'ad'
+      if (detectarAnuncioDisney()) return 'ad'
       if (videoAtual.readyState < HAVE_METADATA) return 'buffering'
       if (!videoAtual.paused) return 'playing'
       return 'paused'
@@ -570,11 +591,11 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
 
     /** Libera todos os recursos e remove todos os listeners */
     destroy(): void {
-      // HIGH-2: cancela qualquer aguardarVideoNetflix em andamento
+      // Cancela qualquer aguardarVideoDisney em andamento
       aguardarAbortController?.abort()
       aguardarAbortController = null
 
-      // HIGH-2: invalida qualquer onSpaNavegacao em voo incrementando o token
+      // Invalida qualquer onSpaNavegacao em voo incrementando o token
       navigationSeq++
 
       // Remove handlers nativos do video

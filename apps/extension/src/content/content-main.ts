@@ -6,6 +6,9 @@
 import type { AdapterFactory, ServiceAdapter } from '../adapters/interface'
 import { createYouTubeAdapter } from '../adapters/youtube'
 import { createNetflixAdapter } from '../adapters/netflix'
+import { createPrimeVideoAdapter } from '../adapters/prime'
+import { createDisneyAdapter } from '../adapters/disney'
+import { createMaxAdapter } from '../adapters/max'
 import type { ServerEvent } from '@openparty/protocol'
 import { computeClockOffset, selectBestOffset } from '../lib/clock'
 import { decideSyncAction } from '../lib/sync'
@@ -19,14 +22,18 @@ import type { ChatOverlayHandle } from './overlay/types'
 // ---------------------------------------------------------------------------
 
 const ADAPTER_REGISTRY: Record<string, AdapterFactory> = {
+  // YouTube
   'www.youtube.com': createYouTubeAdapter,
+  // Netflix
   'www.netflix.com': createNetflixAdapter,
   'netflix.com': createNetflixAdapter,
+  // Prime Video (Sprint 3)
+  'www.primevideo.com': createPrimeVideoAdapter,
+  // Disney+ (Sprint 3)
+  'www.disneyplus.com': createDisneyAdapter,
+  // Max (Sprint 3)
+  'www.max.com': createMaxAdapter,
   // Demais adapters adicionados nas proximas sprints:
-  // 'www.primevideo.com': createPrimeAdapter,
-  // 'www.amazon.com': createPrimeAdapter,
-  // 'www.disneyplus.com': createDisneyAdapter,
-  // 'www.max.com': createMaxAdapter,
   // 'www.hulu.com': createHuluAdapter,
   // 'www.crunchyroll.com': createCrunchyrollAdapter,
   // 'tv.apple.com': createAppleTvAdapter,
@@ -367,6 +374,9 @@ function conectarAoBackground(): void {
 // ---------------------------------------------------------------------------
 
 window.addEventListener('pagehide', () => {
+  // HIGH-1: para o observador leve de URL (se ativo)
+  pararUrlObserver()
+
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
@@ -382,12 +392,164 @@ window.addEventListener('pagehide', () => {
 // ---------------------------------------------------------------------------
 // Inicializacao
 // L1: cria o adapter ANTES de abrir a Port; so abre a Port se o adapter existir
+// HIGH-1 + MEDIUM-3: observador leve de URL para renascer/destruir o adapter
+//   em navegacoes SPA que ocorrem antes (ou depois) do adapter estar ativo.
 // ---------------------------------------------------------------------------
+
+/** Intervalo do observador leve de URL no content-main (ms) */
+const OBSERVER_URL_INTERVAL_MS = 800
+
+/** ID do intervalo do observador leve de URL (HIGH-1 / MEDIUM-3) */
+let urlObserverIntervalId: ReturnType<typeof setInterval> | null = null
+
+/** URL monitorada pelo observador leve de URL */
+let urlObservada = location.href
+
+/**
+ * Para e limpa o observador leve de URL.
+ */
+function pararUrlObserver(): void {
+  if (urlObserverIntervalId !== null) {
+    clearInterval(urlObserverIntervalId)
+    urlObserverIntervalId = null
+  }
+}
+
+/**
+ * Desmonta completamente o adapter e a sessao de sync atual.
+ * Chamado quando o usuario navega do player de volta ao catalogo (MEDIUM-3).
+ * Apos a desmontagem, retoma o observador leve para renascer se voltar ao player.
+ */
+function desmontarAdapter(): void {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  port?.disconnect()
+  port = null
+  adapter?.destroy()
+  adapter = null
+  overlay?.destruir()
+  overlay = null
+}
+
+/**
+ * Monta o adapter, o overlay e a conexao com o background.
+ * Chamado pelo observador leve quando a factory retorna uma instancia valida.
+ */
+async function montarAdapter(factory: AdapterFactory): Promise<void> {
+  const instancia = await factory()
+  if (!instancia) return
+
+  // HIGH-1: se o adapter ja foi montado enquanto aguardavamos (race condition),
+  // descarta a instancia recém criada para evitar duplicata.
+  if (adapter) {
+    instancia.destroy()
+    return
+  }
+
+  adapter = instancia
+  registrarListenersDoAdapter(adapter)
+
+  overlay = criarChatOverlay({
+    onEnviarMensagem: (text) => {
+      port?.postMessage({ type: 'chat', text } satisfies { type: 'chat'; text: string })
+    },
+    onEnviarReacao: (emoji) => {
+      port?.postMessage({ type: 'reaction', emoji } satisfies { type: 'reaction'; emoji: string })
+    },
+  })
+
+  conectarAoBackground()
+
+  // HIGH-1: adapter nasceu com sucesso, para o observador que fica tentando
+  pararUrlObserver()
+
+  console.debug('[OpenParty Content] adapter e overlay prontos para', window.location.hostname)
+}
+
+/**
+ * Inicia o observador leve de mudanca de URL (HIGH-1 + MEDIUM-3).
+ *
+ * HIGH-1: se a factory retornou null no load (usuario estava no catalogo),
+ * este observador fica monitorando location.href. Quando a URL mudar para
+ * uma rota de player, tenta instanciar o adapter novamente.
+ *
+ * MEDIUM-3: quando o adapter ja esta ativo e o usuario navega de volta ao
+ * catalogo (URL sai da rota de player), destroi o adapter e retoma o
+ * observador para renascer se o usuario voltar ao player.
+ *
+ * O observador e limpo no pagehide e quando o adapter nasce com sucesso.
+ */
+function iniciarUrlObserver(factory: AdapterFactory): void {
+  if (urlObserverIntervalId !== null) return
+
+  const popstateHandler = (): void => {
+    // Popstate dispara de forma sincrona; atualizamos a URL observada e
+    // verificamos o estado na proxima iteracao do setInterval (ja agendada).
+    urlObservada = location.href
+    verificarMudancaDeUrl()
+  }
+
+  const verificarMudancaDeUrl = (): void => {
+    const novaUrl = location.href
+    if (novaUrl === urlObservada && adapter !== null) return
+
+    const urlAnterior = urlObservada
+    urlObservada = novaUrl
+
+    const urlAnteriorEraPlayer = adapter !== null
+
+    // MEDIUM-3: estava no player e saiu para o catalogo
+    // Detectamos "saiu do player" pela factory retornando null quando re-chamada
+    // com a nova URL - mas a factory ja tem logica interna (aguardarVideo*) para
+    // retornar null em rotas de catalogo (MEDIUM-2 / gate de path).
+    // Usamos uma heuristica simples: se havia adapter ativo e a nova URL mudou
+    // significativamente (diferente de pathname), disparamos a checagem.
+    if (urlAnteriorEraPlayer && novaUrl !== urlAnterior) {
+      // Tenta criar nova instancia para ver se ainda estamos em rota de player.
+      // Se a factory retornar null (catalogo), desmontamos o adapter existente.
+      factory().then((instancia) => {
+        if (instancia) {
+          // Ainda em rota de player (ex: troca de episodio) - descarta duplicata,
+          // o adapter interno SPA (dentro do adapter) ja cuida da re-ligacao.
+          instancia.destroy()
+        } else if (adapter !== null) {
+          // Saiu da rota de player - desmonta e retoma observador para renascer
+          console.debug('[OpenParty Content] usuario saiu do player, desmontando adapter')
+          desmontarAdapter()
+          // O observador continua ativo para renascer quando voltar ao player
+        }
+      }).catch(() => { /* silencioso - factory lancando erro nao e fatal */ })
+      return
+    }
+
+    // HIGH-1: sem adapter ativo - tenta montar
+    if (!adapter) {
+      montarAdapter(factory).catch((err) => {
+        console.warn('[OpenParty Content] erro ao montar adapter via observador de URL:', err)
+      })
+    }
+  }
+
+  window.addEventListener('popstate', popstateHandler)
+
+  urlObserverIntervalId = setInterval(verificarMudancaDeUrl, OBSERVER_URL_INTERVAL_MS)
+
+  // Garante limpeza do popstate no pagehide.
+  // O pagehide principal (registrado no topo do arquivo) ja chama pararUrlObserver,
+  // que limpa o interval; aqui removemos tambem o listener de popstate.
+  window.addEventListener('pagehide', () => {
+    window.removeEventListener('popstate', popstateHandler)
+  }, { once: true })
+}
 
 /**
  * Ponto de entrada do content script.
  * L1: instancia o adapter ANTES de abrir a Port para evitar Port orfas em
  * paginas sem <video> carregado (ex: pagina inicial do YouTube).
+ * HIGH-1: se a factory retornar null no load (usuario no catalogo/home),
+ * instala o observador leve de URL para tentar novamente quando entrar no player.
  */
 async function init(): Promise<void> {
   const hostname = window.location.hostname
@@ -402,7 +564,12 @@ async function init(): Promise<void> {
   // pagina inicial do YouTube (sem <video> carregado)
   const instancia = await factory()
   if (!instancia) {
-    console.warn('[OpenParty Content] adapter nao encontrou elemento de video em', hostname)
+    // HIGH-1: factory retornou null (usuario esta na home/catalogo).
+    // O Chrome nao reinjeta o content script em navegacoes SPA, entao
+    // instalamos um observador leve de URL para tentar novamente quando
+    // o usuario navegar para uma rota de player.
+    console.debug('[OpenParty Content] adapter nao disponivel em', hostname, '- aguardando rota de player via observador de URL')
+    iniciarUrlObserver(factory)
     return
   }
 
