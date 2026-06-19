@@ -3,11 +3,13 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "vitest/globals"],
     "allowImportingTsExtensions": false,
-    "noEmit": false,
-    "outDir": "dist",
-    "rootDir": "src"
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": [
+    "src/**/*",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }
