@@ -28,9 +28,6 @@ jobs:
           node-version: "22"
           cache: "pnpm"
 
-      - name: Configura Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Instala dependencias
         run: pnpm install --frozen-lockfile
 
@@ -41,4 +38,4 @@ jobs:
         run: pnpm run build
 
       - name: Testes
-        run: bunx vitest run
+        run: pnpm run test
