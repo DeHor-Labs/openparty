@@ -15,7 +15,7 @@ export function RoomSidebar({ peers, messages, onSendMessage }: RoomSidebarProps
   const [tab, setTab] = useState<Tab>('presence')
   const [draft, setDraft] = useState('')
 
-  function handleChatSubmit(e: React.FormEvent) {
+  function handleChatSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     const text = draft.trim()
     if (!text) return
