@@ -6,13 +6,16 @@ export function handleClockPing(
   event: ClockPingEvent,
   client: RoomClient
 ): void {
+  // t2 capturado logo ao entrar no handler (recepcao do ping)
   const t2 = Date.now()
-  const t3 = Date.now()
 
-  client.send({
-    type: 'clock-pong',
+  const pong = {
+    type: 'clock-pong' as const,
     t1: event.t1,
     t2,
-    t3,
-  })
+    // t3 capturado imediatamente antes de montar o pong (envio iminente)
+    t3: Date.now(),
+  }
+
+  client.send(pong)
 }
