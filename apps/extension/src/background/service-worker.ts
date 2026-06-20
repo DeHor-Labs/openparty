@@ -58,7 +58,7 @@ function broadcastParaContentScripts(event: ServerEvent): void {
 
 /**
  * Monta a URL completa do WebSocket incluindo o roomId no path.
- * serverUrl deve ser a base sem trailing slash (ex: wss://openparty.app/ws).
+ * serverUrl deve ser a base sem trailing slash (ex: wss://openparty.dehor.com.br/ws).
  * A URL final sera: <serverUrl>/<roomId>.
  */
 function montarWsUrl(serverUrl: string, roomId: string): string {

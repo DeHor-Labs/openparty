@@ -85,7 +85,7 @@ function mostrarTelaEntrada(): void {
 function mostrarTelaSala(roomId: string, wsState: number, peers: number): void {
   el('tela-entrada').style.display = 'none'
   el('tela-sala').style.display = 'block'
-  el<HTMLInputElement>('link-convite').value = `https://openparty.app/join/${roomId}`
+  el<HTMLInputElement>('link-convite').value = `https://openparty.dehor.com.br/join/${roomId}`
   el('status-ws').textContent = labelEstadoWs(wsState)
   el('contagem-peers').textContent = `${peers} participante${peers !== 1 ? 's' : ''}`
 }

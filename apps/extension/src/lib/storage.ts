@@ -23,7 +23,7 @@ const STORAGE_DEFAULTS: ExtensionStorage = {
   userId: null,
   displayName: 'Participante',
   avatar: '🎬',
-  serverUrl: 'wss://openparty.app/ws',
+  serverUrl: 'wss://openparty.dehor.com.br/ws',
   clockOffsetMs: 0,
 }
 
