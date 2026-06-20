@@ -1,48 +1,48 @@
-// src/adapters/max.ts
-// Adapter do Max (max.com) para a extensao OpenParty.
+// src/adapters/paramount.ts
+// Adapter do Paramount+ para a extensao OpenParty.
 //
-// Controla o player via elemento <video> nativo em paginas max.com/play/*.
-// Nao usa nenhuma API privada do Max - apenas HTMLVideoElement padrao.
+// Controla o player via elemento <video> nativo em paginas paramountplus.com.
+// Nao usa nenhuma API privada do Paramount+ - apenas HTMLVideoElement padrao.
 //
 // Heuristica de selecao do <video>:
-//   1. Tenta o seletor especifico do container do player:
-//      `[data-testid="player-ux-root"] video`
-//   2. Fallback: `[class*="PlayerContainer"] video`
-//   3. Fallback final: todos os elementos <video> da pagina, filtrando por:
-//      - Maior duracao (conteudo principal tem duracao > trailers e previews)
-//      - Maior area renderizada (offsetWidth * offsetHeight)
-//      - Area minima para excluir thumbnails e previews de hover
+//   1. Qualquer <video> na pagina validado por area minima e duracao conhecida.
+//      O Paramount+ utiliza apenas um unico <video> na pagina durante reproducao,
+//      conforme verificado em multiplas extensoes open source (Netflix-Prime-Auto-Skip,
+//      Paramount-Tools) que usam document.querySelector("video") diretamente.
+//   2. Fallback: entre todos os <video>, escolhe o de maior duracao.
+//   3. Fallback final: video de maior area renderizada.
 //
-// Seletores confirmados por inspeçao de extensoes reais (np-auto-skip):
-//   - `[data-testid="player-ux-root"]` - container raiz do player Max
-//   - `[data-testid="player-ux-season-episode"]` - metadados do episodio
-//   - `[data-testid="player-ux-fullscreen-button"]` - botao fullscreen
-//   - `button[class*="SkipButton-"]` - botao de pular intro/recap
-//   - `div[class*="ControlsFooterBottomRight-"]` - area de controles
-//
-// Deteccao de anuncio:
-//   O Max exibe anuncios (plano com publicidade) via SSAI (Server-Side Ad Insertion).
-//   Isso significa que os anuncios sao segmentos do proprio stream; o elemento
-//   <video> e o mesmo. Detectamos por heuristicas de UI, escopadas ao container
-//   do player ([data-testid="player-ux-root"]) para evitar falso positivo:
-//     1. Whitelist de data-testid exatos: ad-badge, ad-timer, ad-countdown, ad-panel,
-//        ad-overlay, ad-skip-button, ad-break. Evita falso positivo com testids que
-//        contem a substring "ad" (ex: add-to-watchlist, loaded, metadata).
-//     2. Seletores de classe CSS: [class*="AdBreak"], [class*="AdTimer"],
-//        [class*="AdPanel"], [class*="AdOverlay"], [class*="AdCountdown"], [class*="SkipAd"].
-//   LIMITACAO CONHECIDA: Classes CSS do Max sao geradas por CSS Modules com hashes
-//   (ex: `AdBreak-abc123`). O seletor `[class*="AdBreak"]` captura o nome base
-//   mesmo com hash, mas pode quebrar se o Max renomear o componente.
-//   LIMITACAO SSAI: Como os anuncios estao inseridos no stream, nao ha como
-//   detectar o inicio/fim de anuncio com 100% de confiabilidade apenas por DOM.
-//   A heuristica e best-effort; falsos negativos sao possiveis.
+// Gate de path (rota de player):
+//   So seleciona o <video> quando o pathname corresponde a rota de player:
+//   - /shows/video/ (episodios de series)
+//   - /movies/video/ (filmes)
+//   SPA_PATH_REGEX valida o pathname antes de tentar encontrar o video.
 //
 // Navegacao SPA:
-//   O Max e uma SPA React. Troca de conteudo via History API (pushState).
-//   Paginas de reproducao seguem o padrao `/play/<id>` em max.com.
+//   O Paramount+ troca de episodio via History API (pushState) sem recarregar a pagina.
 //   Usamos dois mecanismos combinados:
 //     - Listener em popstate (navegacao com back/forward)
-//     - Polling leve de location.href a cada SPA_POLL_INTERVAL_MS
+//     - Polling leve de location.href a cada SPA_POLL_INTERVAL_MS, limpado no destroy()
+//   Ambos verificam SPA_PATH_REGEX antes de acionar re-resolucao do video.
+//
+// Deteccao de anuncio (plano Essential com publicidade):
+//   O Paramount+ exibe anuncios no mesmo elemento <video> principal.
+//   Heuristicas de deteccao (do mais ao menos estavel):
+//     1. Presenca de `div.ad-info-manager-circular-loader-copy` - container do
+//        contador de tempo restante do anuncio (progressbar circular). Observado
+//        em Dreamlinerm/Netflix-Prime-Auto-Skip e beingenfa/ad-muter-paramountplus.
+//     2. Presenca de `div.ad-click-overlay` - overlay clicavel exibido durante
+//        anuncios no plano Essential do Paramount+.
+//     3. Presenca de `[class*="ad-info-manager"]` - fallback por correspondencia
+//        parcial de classe, mais tolerante a variações de sufixo.
+//   CR-MAJOR: so considera anuncio se o elemento estiver visivel (elementoVisivel).
+//
+// LIMITACAO CONHECIDA: Os seletores de anuncio do Paramount+ podem mudar com
+// atualizacoes do player. Os seletores acima sao baseados em analise de extensoes
+// open source ativas (Netflix-Prime-Auto-Skip, beingenfa/ad-muter-paramountplus) e
+// na estrutura do DOM verificada por multiplos projetos. O seletor
+// `div.ad-info-manager-circular-loader-copy` e o mais estavel por corresponder
+// a um componente de UI de anuncio com nome semantico.
 
 import type { AdapterEventName, PlaybackState, ServiceAdapter } from './interface'
 import type { StreamingServiceType } from '../lib/sync'
@@ -51,62 +51,40 @@ import type { StreamingServiceType } from '../lib/sync'
 // Constantes
 // ---------------------------------------------------------------------------
 
-/** Seletor preferencial do <video> via container raiz do player */
-const VIDEO_SELETOR_PRIMARIO = '[data-testid="player-ux-root"] video'
-
-/** Seletor secundario via classe CSS do container do player */
-const VIDEO_SELETOR_SECUNDARIO = '[class*="PlayerContainer"] video'
-
-/** Seletor fallback - qualquer <video> na pagina */
+/** Seletor fallback: qualquer <video> na pagina */
 const VIDEO_SELETOR_FALLBACK = 'video'
 
-/** Container raiz do player Max (usado para o MutationObserver de anuncio) */
-const PLAYER_CONTAINER_SELETOR = '[data-testid="player-ux-root"]'
+/** Container de controles do player (usado no MutationObserver de anuncio) */
+const PLAYER_CONTAINER_SELETOR = '.controls-bottom-right'
+
+/** Container alternativo do player */
+const PLAYER_CONTAINER_SELETOR_ALT = '.controls-bottom-center-wrapper'
 
 /**
- * data-testid exatos de elementos de anuncio do Max.
- * Whitelist restrita para evitar falso positivo com "add-to-watchlist",
- * "loaded", "metadata" e outros testids que contem a substring "ad".
- *
- * HIGH-2: substituiu o seletor amplo [data-testid*="ad"] que casava com
- * qualquer atributo contendo a substring, gerando falso positivo e suprimindo
- * o sync incorretamente em paginas de catalogo.
+ * Seletores de UI de anuncio do Paramount+.
+ * Listados do mais estavel (semantico) ao menos estavel (correspondencia parcial).
+ * Fontes: Netflix-Prime-Auto-Skip/src/content-script/paramount.ts,
+ *         beingenfa/ad-muter-paramountplus.
  */
-const AD_DATA_TESTIDS: readonly string[] = [
-  'ad-badge',
-  'ad-timer',
-  'ad-countdown',
-  'ad-panel',
-  'ad-overlay',
-  'ad-skip-button',
-  'ad-break',
+const AD_SELETORES = [
+  // Contador circular de tempo restante do anuncio Essential (mais estavel)
+  'div.ad-info-manager-circular-loader-copy',
+  // Overlay clicavel exibido durante reproducao de anuncio
+  'div.ad-click-overlay',
+  // Fallback por correspondencia parcial (tolera mudancas de sufixo)
+  '[class*="ad-info-manager"]',
 ]
 
-/**
- * Seletores de classe CSS de UI de anuncio do Max (do mais estavel ao menos estavel).
- * Aplicados apenas dentro do container do player para evitar colisao com outros
- * elementos da pagina que possam ter classes com as mesmas substrings.
- * O Max usa SSAI, portanto a deteccao e exclusivamente por DOM da UI.
- */
-const AD_SELETORES_CLASSE = [
-  '[class*="AdBreak"]',
-  '[class*="AdTimer"]',
-  '[class*="AdPanel"]',
-  '[class*="AdOverlay"]',
-  '[class*="AdCountdown"]',
-  '[class*="SkipAd"]',
-]
-
-/** readyState minimo para considerar o <video> carregado com metadados */
+/** readyState minimo para considerar o <video> com metadados carregados */
 const HAVE_METADATA = 2
 
-/** Area minima (pixels quadrados) para excluir thumbnails e previews de hover */
-const VIDEO_AREA_MINIMA_PX2 = 40_000 // ~200x200px
+/** Area minima (pixels quadrados) para considerar o <video> como player principal */
+const VIDEO_AREA_MINIMA_PX2 = 40_000 // ~200x200px - descarta previews de hover
 
-/** Tempo maximo de espera pelo <video> aparecer no DOM (ms) */
+/** Tempo maximo de espera pelo <video> aparecer apos navegacao SPA (ms) */
 const VIDEO_WAIT_TIMEOUT_MS = 8_000
 
-/** Intervalo de polling fallback dentro de aguardarVideo (ms) */
+/** Intervalo de polling interno do aguardarVideo (ms) */
 const VIDEO_POLL_INTERVAL_MS = 300
 
 /** Intervalo de polling para detectar navegacao SPA via pushState (ms) */
@@ -119,10 +97,14 @@ const SPA_POLL_INTERVAL_MS = 800
  */
 const SPA_RENAVIGATE_DELAY_MS = 150
 
-/** Segmento de path que identifica paginas de reproducao do Max */
-const MAX_WATCH_PATH = '/play/'
+/**
+ * Regex que identifica URLs de reproducao do Paramount+.
+ * Cobre /shows/video/ (episodios de series) e /movies/video/ (filmes).
+ * Usado para filtrar o popstate e o polling de SPA.
+ */
+const SPA_PATH_REGEX = /\/(shows|movies)\/video\//i
 
-/** Mapeamento de eventos nativos do video para AdapterEventName */
+/** Mapeamento de eventos nativos do <video> para AdapterEventName */
 const NATIVE_TO_ADAPTER: Record<string, AdapterEventName> = {
   play: 'play',
   pause: 'pause',
@@ -137,10 +119,7 @@ const NATIVE_TO_ADAPTER: Record<string, AdapterEventName> = {
 
 /**
  * Verifica se um elemento <video> tem area de renderizacao suficiente para
- * ser considerado o player principal (nao um thumbnail ou preview).
- *
- * Usa getBoundingClientRect para obter dimensoes reais renderizadas,
- * mais preciso que offsetWidth/offsetHeight para elementos transformed.
+ * ser considerado o player principal (descarta previews de hover do catalogo).
  */
 function videoTemAreaSuficiente(v: HTMLVideoElement): boolean {
   const rect = v.getBoundingClientRect()
@@ -148,37 +127,35 @@ function videoTemAreaSuficiente(v: HTMLVideoElement): boolean {
 }
 
 /**
- * Seleciona o elemento <video> principal do player Max.
+ * Seleciona o elemento <video> principal do player Paramount+.
+ *
+ * Gate de path: retorna null imediatamente se o pathname nao for de player.
+ * O Paramount+ usa um unico <video> durante reproducao; heuristica de area
+ * e duracao e usada como desempate em casos raros (ex: video de preview).
  *
  * Heuristica em ordem de prioridade:
- * 1. Seletor do container raiz `[data-testid="player-ux-root"] video`
- *    - Validado por area minima para excluir previews
- * 2. Seletor do container por classe `[class*="PlayerContainer"] video`
- *    - Validado por area minima
- * 3. Entre todos os <video> da pagina com area suficiente, o de maior duracao
- * 4. Entre todos os <video> da pagina, o de maior area renderizada
+ * 1. Unico <video> na pagina com area suficiente (caso mais comum)
+ * 2. Entre multiplos <video>, escolhe o de maior duracao (conteudo > trailers)
+ * 3. Entre multiplos <video>, escolhe o de maior area renderizada
+ * 4. Primeiro candidato da lista (ultimo recurso)
  *
- * Retorna null se nenhum <video> adequado for encontrado.
+ * Retorna null se nenhum <video> adequado for encontrado ou se fora de rota de player.
  */
-function selecionarVideoMax(): HTMLVideoElement | null {
-  // Tentativa 1: seletor especifico via data-testid do player-ux-root
-  const primario = document.querySelector<HTMLVideoElement>(VIDEO_SELETOR_PRIMARIO)
-  if (primario && videoTemAreaSuficiente(primario)) return primario
+function selecionarVideoParamount(): HTMLVideoElement | null {
+  // Gate de path: so seleciona em rota de player
+  if (!SPA_PATH_REGEX.test(new URL(location.href).pathname)) return null
 
-  // Tentativa 2: seletor por classe CSS do container do player
-  const secundario = document.querySelector<HTMLVideoElement>(VIDEO_SELETOR_SECUNDARIO)
-  if (secundario && videoTemAreaSuficiente(secundario)) return secundario
-
-  // Tentativa 3 e 4: heuristica entre todos os videos da pagina
   const todos = Array.from(document.querySelectorAll<HTMLVideoElement>(VIDEO_SELETOR_FALLBACK))
   if (todos.length === 0) return null
 
+  // Filtra por area minima antes de aplicar heuristica de duracao
   const comAreaSuficiente = todos.filter(videoTemAreaSuficiente)
   const candidatos = comAreaSuficiente.length > 0 ? comAreaSuficiente : todos
 
+  // Caso comum: um unico candidato
   if (candidatos.length === 1) return candidatos[0]
 
-  // Prioriza videos com duracao conhecida (conteudo > trailers)
+  // Prioriza videos com duracao conhecida (conteudo principal vs trailers)
   const comDuracao = candidatos.filter(
     (v) => v.readyState >= HAVE_METADATA && Number.isFinite(v.duration) && v.duration > 0,
   )
@@ -194,22 +171,10 @@ function selecionarVideoMax(): HTMLVideoElement | null {
     )
   }
 
+  // Ultimo recurso: primeiro candidato da lista
   return candidatos[0] ?? null
 }
 
-/**
- * Retorna true se o player Max esta exibindo um anuncio no momento.
- *
- * HIGH-2: a busca e escopada ao container do player ([data-testid="player-ux-root"])
- * para evitar falso positivo. Elementos como "add-to-watchlist", "metadata" e outros
- * que contem a substring "ad" no testid ficam fora do container do player.
- *
- * A deteccao usa duas estrategias complementares:
- *   1. Whitelist de data-testid exatos (AD_DATA_TESTIDS) dentro do container do player.
- *   2. Seletores de classe CSS de anuncio (AD_SELETORES_CLASSE) dentro do mesmo container.
- *
- * Ver AD_DATA_TESTIDS, AD_SELETORES_CLASSE e limitacoes SSAI no cabecalho do arquivo.
- */
 /**
  * Retorna true se o elemento esta visivel no viewport de forma confiavel.
  *
@@ -226,37 +191,30 @@ function elementoVisivel(el: Element): boolean {
   return true
 }
 
-function detectarAnuncioMax(): boolean {
-  // Escopa a busca ao container do player; fallback para o body se o container
-  // ainda nao foi inserido no DOM (improvavel em paginas de reproducao).
-  const container = document.querySelector(PLAYER_CONTAINER_SELETOR) ?? document.body
-
-  // Verifica data-testid exatos (whitelist) dentro do container
-  // CR-MAJOR: exige visibilidade para evitar falso positivo com elementos ocultos
-  for (const testid of AD_DATA_TESTIDS) {
-    const el = container.querySelector(`[data-testid="${testid}"]`)
+/**
+ * Retorna true se o player Paramount+ esta exibindo um anuncio no momento.
+ *
+ * Verifica os seletores de UI de anuncio. Ver lista AD_SELETORES
+ * e LIMITACAO CONHECIDA no cabecalho do arquivo.
+ * CR-MAJOR: exige que o elemento de anuncio esteja visivel (elementoVisivel).
+ */
+function detectarAnuncioParamount(): boolean {
+  for (const seletor of AD_SELETORES) {
+    const el = document.querySelector(seletor)
     if (el && elementoVisivel(el)) return true
   }
-
-  // Verifica seletores de classe CSS de anuncio dentro do container
-  // CR-MAJOR: exige visibilidade
-  for (const seletor of AD_SELETORES_CLASSE) {
-    const el = container.querySelector(seletor)
-    if (el && elementoVisivel(el)) return true
-  }
-
   return false
 }
 
 /**
- * Aguarda o elemento <video> principal do Max aparecer no DOM.
+ * Aguarda o elemento <video> principal do Paramount+ aparecer no DOM.
  *
  * Usa MutationObserver como mecanismo primario e polling como fallback.
  * Respeita VIDEO_WAIT_TIMEOUT_MS antes de desistir e retornar null.
  * Aceita AbortSignal para cancelamento antecipado (destroy ou nova navegacao).
  */
-async function aguardarVideoMax(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
-  const existente = selecionarVideoMax()
+async function aguardarVideoParamount(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
+  const existente = selecionarVideoParamount()
   if (existente) return existente
 
   return new Promise<HTMLVideoElement | null>((resolve) => {
@@ -289,6 +247,7 @@ async function aguardarVideoMax(signal?: AbortSignal): Promise<HTMLVideoElement 
       resolve(null)
     }
 
+    // Abortar via signal (destroy ou nova navegacao)
     if (signal?.aborted) {
       resolve(null)
       return
@@ -298,7 +257,7 @@ async function aguardarVideoMax(signal?: AbortSignal): Promise<HTMLVideoElement 
     // MutationObserver como mecanismo primario
     observer = new MutationObserver(() => {
       if (signal?.aborted) return
-      const v = selecionarVideoMax()
+      const v = selecionarVideoParamount()
       if (v) encontrou(v)
     })
     observer.observe(document.body, { childList: true, subtree: true })
@@ -306,7 +265,7 @@ async function aguardarVideoMax(signal?: AbortSignal): Promise<HTMLVideoElement 
     // Polling como fallback (necessario quando o MutationObserver e throttled)
     pollingId = setInterval(() => {
       if (signal?.aborted) return
-      const v = selecionarVideoMax()
+      const v = selecionarVideoParamount()
       if (v) encontrou(v)
     }, VIDEO_POLL_INTERVAL_MS)
 
@@ -323,20 +282,22 @@ async function aguardarVideoMax(signal?: AbortSignal): Promise<HTMLVideoElement 
 // ---------------------------------------------------------------------------
 
 /**
- * Cria o adapter do Max conectando ao elemento <video> nativo do player.
+ * Cria o adapter do Paramount+ conectando ao elemento <video> nativo do player.
  *
  * Retorna null se nenhum elemento <video> adequado for encontrado na pagina
- * (ex: pagina de catalogo do Max sem reproducao ativa).
+ * (ex: pagina inicial do Paramount+, catalogo sem reproducao ativa, ou rota
+ * que nao corresponde a SPA_PATH_REGEX).
  *
- * SPA: Detecta mudanca de URL (troca de conteudo) via polling de location.href
- * e via popstate. Ao detectar mudanca em /play/:id, re-resolve o <video> e
- * reconfigura todos os listeners.
+ * SPA: Detecta mudanca de URL (troca de episodio/conteudo) via polling de
+ * location.href e via popstate. Ao detectar mudanca em path de player, re-resolve
+ * o <video> e reconfigura todos os listeners com token de sequencia para cancelar
+ * navegacoes concorrentes.
  *
  * Anuncio: Observa a UI do player via MutationObserver para emitir ad-start/ad-end.
- * Limitacao SSAI: deteccao e best-effort via elementos de UI - ver cabecalho.
+ * Exige que o elemento de anuncio esteja visivel antes de emitir o evento.
  */
-export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
-  const video = await aguardarVideoMax()
+export async function createParamountAdapter(): Promise<ServiceAdapter | null> {
+  const video = await aguardarVideoParamount()
   if (!video) return null
 
   // Mapa de listeners: AdapterEventName -> conjunto de handlers do usuario
@@ -346,7 +307,7 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   let nativeHandlers = new Map<string, EventListener>()
 
   // Estado de anuncio anterior (para o MutationObserver de ad-start/ad-end)
-  let eraAnuncio = detectarAnuncioMax()
+  let eraAnuncio = detectarAnuncioParamount()
 
   // Observer para detectar transicao de anuncio
   let adObserver: MutationObserver | null = null
@@ -354,7 +315,7 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // Referencia ao elemento video atual (pode mudar em navegacao SPA)
   let videoAtual: HTMLVideoElement = video
 
-  // URL atual - usada para detectar mudanca de conteudo via polling
+  // URL atual - usada para detectar mudanca de episodio/conteudo via polling
   let urlAtual = location.href
 
   // ID do intervalo de polling de URL (SPA)
@@ -365,7 +326,7 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // Se nao for, a navegacao foi superada por uma mais recente e devemos abortar.
   let navigationSeq = 0
 
-  // AbortController da aguardarVideoMax em andamento.
+  // AbortController da aguardarVideoParamount em andamento.
   // Cancelado no destroy() e em cada nova navegacao.
   let aguardarAbortController: AbortController | null = null
 
@@ -424,17 +385,21 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // ---------------------------------------------------------------------------
 
   /**
-   * Configura MutationObserver para detectar transicoes de anuncio.
-   * Observa o container raiz do player ou o body como fallback.
+   * Configura MutationObserver para detectar transicoes de anuncio no Paramount+.
+   * Observa o container de controles do player ou o body como fallback.
    * Emite ad-start quando o anuncio comeca, ad-end quando termina.
    */
   function configurarAdObserver(): void {
     adObserver?.disconnect()
 
-    const alvo = document.querySelector(PLAYER_CONTAINER_SELETOR) ?? document.body
+    // Observa o container primario, alternativo ou body como ultimo recurso
+    const alvo =
+      document.querySelector(PLAYER_CONTAINER_SELETOR) ??
+      document.querySelector(PLAYER_CONTAINER_SELETOR_ALT) ??
+      document.body
 
     adObserver = new MutationObserver(() => {
-      const isAnuncio = detectarAnuncioMax()
+      const isAnuncio = detectarAnuncioParamount()
       if (isAnuncio && !eraAnuncio) {
         eraAnuncio = true
         emit('ad-start')
@@ -448,7 +413,7 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-testid', 'class', 'style'],
+      attributeFilter: ['class', 'style'],
     })
   }
 
@@ -457,15 +422,15 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // ---------------------------------------------------------------------------
 
   /**
-   * Chamado quando detectamos mudanca de URL (troca de conteudo no Max).
+   * Chamado quando detectamos mudanca de URL (troca de episodio ou conteudo).
    * Re-resolve o <video> e reconfigura todos os listeners.
    *
    * Single-flight por token de sequencia:
-   * - Incrementa navigationSeq ao entrar; cancela o aguardarVideoMax anterior.
+   * - Incrementa navigationSeq ao entrar; cancela o aguardarVideoParamount anterior.
    * - Apos cada await, verifica se o token ainda e o atual; se nao, aborta.
    * - Remove handlers do video anterior SOMENTE apos resolucao bem-sucedida,
-   *   evitando estado zumbi quando aguardarVideoMax expira sem resultado.
-   * - Retry leve enquanto estiver em /play/ (uma nova tentativa apos timeout).
+   *   evitando estado zumbi quando aguardarVideoParamount expira sem resultado.
+   * - Retry leve enquanto estiver em path de player (uma nova tentativa apos timeout).
    */
   async function onSpaNavegacao(): Promise<void> {
     // Cancela qualquer aguardar em andamento e captura o token local
@@ -482,28 +447,28 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
       await new Promise<void>((r) => setTimeout(r, SPA_RENAVIGATE_DELAY_MS))
       if (meuSeq !== navigationSeq || controller.signal.aborted) return false
 
-      const novoVideo = await aguardarVideoMax(controller.signal)
+      const novoVideo = await aguardarVideoParamount(controller.signal)
 
       // Verifica se a navegacao ainda e a mais recente
       if (meuSeq !== navigationSeq) return false
       if (controller.signal.aborted) return false
+
       if (!novoVideo) return false
 
       // Remove handlers do video anterior somente apos resolucao bem-sucedida
       removerHandlersNativos()
       registrarHandlersNativos(novoVideo)
       configurarAdObserver()
-      eraAnuncio = detectarAnuncioMax()
-      console.debug('[OpenParty Max] adapter re-ligado apos navegacao SPA')
+      eraAnuncio = detectarAnuncioParamount()
+      console.debug('[OpenParty Paramount+] adapter re-ligado apos navegacao SPA')
       return true
     }
 
     const ok = await tentarReligar()
 
-    // Retry leve: se timeout e ainda em /play/, tenta mais uma vez
-    // LOW-2: usa new URL(location.href).pathname para consistencia com o popstate handler
-    if (!ok && meuSeq === navigationSeq && !controller.signal.aborted && new URL(location.href).pathname.includes(MAX_WATCH_PATH)) {
-      console.debug('[OpenParty Max] retry de re-ligacao apos timeout em /play/')
+    // Retry leve - se timeout e ainda estamos em path de player, tenta mais uma vez
+    if (!ok && meuSeq === navigationSeq && !controller.signal.aborted && SPA_PATH_REGEX.test(new URL(location.href).pathname)) {
+      console.debug('[OpenParty Paramount+] retry de re-ligacao apos timeout em path de player')
       await tentarReligar()
     }
 
@@ -514,14 +479,13 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
 
   const spaNavegacaoHandler = (): void => {
     onSpaNavegacao().catch((err) => {
-      console.warn('[OpenParty Max] erro ao religar adapter apos SPA:', err)
+      console.warn('[OpenParty Paramount+] erro ao religar adapter apos SPA:', err)
     })
   }
 
   /**
    * Inicia o polling leve de location.href para detectar mudancas de URL SPA.
-   * O Max usa pushState ao trocar de conteudo; popstate cobre apenas back/forward.
-   * O polling garante captura de pushState sem monkey-patch.
+   * O Paramount+ usa pushState ao trocar de episodio; popstate cobre apenas back/forward.
    */
   function iniciarSpaPolling(): void {
     if (spaPollingId !== null) return
@@ -530,9 +494,9 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
       const novaUrl = location.href
       if (novaUrl !== urlAtual) {
         urlAtual = novaUrl
-        // LOW-2: usa pathname via new URL para consistencia com o popstate handler
-        // Apenas reage se for uma URL de reproducao (evita reagir a navegacao para catalogo)
-        if (new URL(novaUrl).pathname.includes(MAX_WATCH_PATH)) {
+        // LOW-2: usa pathname via new URL para consistencia com o popstate handler e o retry
+        // Apenas reage se for uma URL de player (evita reagir a navegacao ao catalogo)
+        if (SPA_PATH_REGEX.test(new URL(novaUrl).pathname)) {
           spaNavegacaoHandler()
         }
       }
@@ -550,18 +514,18 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // Inicializacao
   // ---------------------------------------------------------------------------
 
-  // Handler de popstate filtrado: reage apenas quando a URL resultante e /play/
-  // (o polling ja filtra pushState; sem este filtro popstate reagia a qualquer
-  //  navegacao back/forward, inclusive saindo do catalogo para a home).
+  // Handler de popstate filtrado: reage apenas quando a URL resultante e de player
+  // (sem este filtro popstate reagia a qualquer navegacao back/forward, inclusive
+  //  saindo do player para o catalogo ou pagina inicial)
   const spaPopstateHandler = (): void => {
-    if (!window.location.pathname.includes(MAX_WATCH_PATH)) return
+    if (!SPA_PATH_REGEX.test(window.location.pathname)) return
     spaNavegacaoHandler()
   }
 
   // Registra handler de popstate (back/forward do browser)
   window.addEventListener('popstate', spaPopstateHandler)
 
-  // Inicia polling de URL para capturar pushState (troca de conteudo)
+  // Inicia polling de URL para capturar pushState (troca de episodio)
   iniciarSpaPolling()
 
   // Registra handlers nativos no video encontrado
@@ -575,17 +539,17 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
   // ---------------------------------------------------------------------------
 
   const adapter: ServiceAdapter = {
-    /** Inicia reproducao no player Max */
+    /** Inicia reproducao no player Paramount+ */
     async play(): Promise<void> {
       await videoAtual.play()
     },
 
-    /** Pausa reproducao no player Max */
+    /** Pausa reproducao no player Paramount+ */
     async pause(): Promise<void> {
       videoAtual.pause()
     },
 
-    /** Salta para `secs` segundos no player Max */
+    /** Salta para `secs` segundos no player Paramount+ */
     async seekTo(secs: number): Promise<void> {
       videoAtual.currentTime = secs
     },
@@ -603,12 +567,12 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
 
     /** Retorna true se o player esta exibindo um anuncio (heuristica best-effort) */
     isAd(): boolean {
-      return detectarAnuncioMax()
+      return detectarAnuncioParamount()
     },
 
     /** Retorna o estado atual do player */
     getPlaybackState(): PlaybackState {
-      if (detectarAnuncioMax()) return 'ad'
+      if (detectarAnuncioParamount()) return 'ad'
       if (videoAtual.readyState < HAVE_METADATA) return 'buffering'
       if (!videoAtual.paused) return 'playing'
       return 'paused'
@@ -634,7 +598,7 @@ export async function createMaxAdapter(): Promise<ServiceAdapter | null> {
 
     /** Libera todos os recursos e remove todos os listeners */
     destroy(): void {
-      // Cancela qualquer aguardarVideoMax em andamento
+      // Cancela qualquer aguardarVideoParamount em andamento
       aguardarAbortController?.abort()
       aguardarAbortController = null
 

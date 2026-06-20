@@ -9,6 +9,11 @@ import { createNetflixAdapter } from '../adapters/netflix'
 import { createPrimeVideoAdapter } from '../adapters/prime'
 import { createDisneyAdapter } from '../adapters/disney'
 import { createMaxAdapter } from '../adapters/max'
+// Sprint 5: novos servicos de streaming
+import { createHuluAdapter } from '../adapters/hulu'
+import { createCrunchyrollAdapter } from '../adapters/crunchyroll'
+import { createAppleTvAdapter } from '../adapters/appletv'
+import { createParamountAdapter } from '../adapters/paramount'
 import type { ServerEvent } from '@openparty/protocol'
 import { computeClockOffset, selectBestOffset } from '../lib/clock'
 import { decideSyncAction } from '../lib/sync'
@@ -33,11 +38,14 @@ const ADAPTER_REGISTRY: Record<string, AdapterFactory> = {
   'www.disneyplus.com': createDisneyAdapter,
   // Max (Sprint 3)
   'www.max.com': createMaxAdapter,
-  // Demais adapters adicionados nas proximas sprints:
-  // 'www.hulu.com': createHuluAdapter,
-  // 'www.crunchyroll.com': createCrunchyrollAdapter,
-  // 'tv.apple.com': createAppleTvAdapter,
-  // 'www.paramountplus.com': createParamountAdapter,
+  // Hulu (Sprint 5)
+  'www.hulu.com': createHuluAdapter,
+  // Crunchyroll (Sprint 5)
+  'www.crunchyroll.com': createCrunchyrollAdapter,
+  // Apple TV+ (Sprint 5) - dominio sem subdominio www
+  'tv.apple.com': createAppleTvAdapter,
+  // Paramount+ (Sprint 5)
+  'www.paramountplus.com': createParamountAdapter,
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,11 @@
     "*://*.netflix.com/*",
     "*://*.primevideo.com/*",
     "*://*.disneyplus.com/*",
-    "*://*.max.com/*"
+    "*://*.max.com/*",
+    "*://*.hulu.com/*",
+    "*://*.crunchyroll.com/*",
+    "*://tv.apple.com/*",
+    "*://*.paramountplus.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.ts",
@@ -22,7 +26,11 @@
         "*://*.netflix.com/watch*",
         "*://*.primevideo.com/*",
         "*://*.disneyplus.com/*",
-        "*://*.max.com/*"
+        "*://*.max.com/*",
+        "*://*.hulu.com/*",
+        "*://*.crunchyroll.com/*",
+        "*://tv.apple.com/*",
+        "*://*.paramountplus.com/*"
       ],
       "js": ["src/content/content-main.ts"],
       "run_at": "document_idle"
@@ -41,7 +49,11 @@
         "*://*.netflix.com/*",
         "*://*.primevideo.com/*",
         "*://*.disneyplus.com/*",
-        "*://*.max.com/*"
+        "*://*.max.com/*",
+        "*://*.hulu.com/*",
+        "*://*.crunchyroll.com/*",
+        "*://tv.apple.com/*",
+        "*://*.paramountplus.com/*"
       ]
     }
   ],

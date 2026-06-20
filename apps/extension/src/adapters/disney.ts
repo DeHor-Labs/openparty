@@ -407,7 +407,7 @@ export async function createDisneyAdapter(): Promise<ServiceAdapter | null> {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class', 'data-testid'],
+      attributeFilter: ['class', 'data-testid', 'style'],
     })
   }
 
