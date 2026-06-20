@@ -385,7 +385,7 @@ export async function createNetflixAdapter(): Promise<ServiceAdapter | null> {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-uia', 'class'],
+      attributeFilter: ['data-uia', 'class', 'style'],
     })
   }
 
