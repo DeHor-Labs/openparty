@@ -1,0 +1,71 @@
+# deploy/docker-compose.prod.yml
+#
+# Composicao de producao para o servidor de sincronizacao OpenParty.
+# Hospeda apenas o servidor Bun/Hono/WebSocket - NAO sobe o web app em
+# container separado (o Dockerfile.allinone ja embute o web estatico).
+#
+# Reverse proxy TLS: Traefik ja instalado na VPS via template Hostinger
+# ("Ubuntu 24.04 with Docker and Traefik"). Roteamento por labels Docker.
+#
+# Porta interna: 3000 (nao exposta ao host; o Traefik acessa via rede Docker).
+# TLS: Let's Encrypt via HTTP-01 challenge (gerenciado pelo Traefik).
+# Dominio: openparty.dehor.com.br
+#
+# Uso:
+#   cd /docker/openparty
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Para rebuild de imagem (apos deploy de nova versao do codigo):
+#   docker compose -f docker-compose.prod.yml up -d --build --no-deps server
+#
+# Variaveis de ambiente:
+#   ALLOWED_ORIGIN  - origem permitida pelo CORS (padrao: https://openparty.dehor.com.br)
+#   REDIS_URL       - URL Redis para broadcaster multi-instancia (opcional; sem Redis
+#                     o broadcaster roda em memoria, restringindo a 1 replica)
+#   PORT            - porta interna do servidor (padrao: 3000, nao alterar sem ajustar label)
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: apps/server/Dockerfile.allinone
+    container_name: openparty-server
+    restart: unless-stopped
+    # Porta NAO exposta ao host - o Traefik acessa via rede Docker interna.
+    # O Docker aloca uma porta efemera apenas para o healthcheck externo;
+    # em producao, o acesso externo ocorre exclusivamente via Traefik/443.
+    expose:
+      - "3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      # CORS: restringir a origem exata do frontend em producao.
+      # Para self-host sem CDN, manter o mesmo dominio.
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-https://openparty.dehor.com.br}
+      # Redis e opcional. Sem ele, o broadcaster opera em memoria (1 replica).
+      - REDIS_URL=${REDIS_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      # Habilita descoberta pelo Traefik
+      - traefik.enable=true
+      # Roteamento HTTPS pelo hostname do subdominio
+      - traefik.http.routers.openparty.rule=Host(`openparty.dehor.com.br`)
+      - traefik.http.routers.openparty.entrypoints=websecure
+      # TLS gerenciado pelo Traefik com Let's Encrypt (HTTP-01)
+      - traefik.http.routers.openparty.tls.certresolver=letsencrypt
+      # Porta interna que o Traefik deve encaminhar o trafego
+      - traefik.http.services.openparty.loadbalancer.server.port=3000
+    networks:
+      - traefik-net
+
+networks:
+  # Rede externa criada pelo Traefik. Nao criar/destruir aqui.
+  # Verificar o nome real com: docker network ls | grep traefik
+  traefik-net:
+    external: true
+    name: traefik_default
