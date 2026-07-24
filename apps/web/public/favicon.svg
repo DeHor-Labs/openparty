@@ -1,0 +1,14 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenParty">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#27A8FF" />
+      <stop offset="100%" stop-color="#0072D5" />
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="240" fill="url(#bgGrad)" />
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="12" />
+  <circle cx="122" cy="122" r="18" fill="#FFFFFF" />
+  <circle cx="390" cy="390" r="18" fill="#FFFFFF" />
+  <polygon points="170,146 170,366 362,256" fill="#FFFFFF"
+    stroke="#FFFFFF" stroke-width="28" stroke-linejoin="round" stroke-linecap="round" />
+</svg>
