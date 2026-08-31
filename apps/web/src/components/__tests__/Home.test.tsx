@@ -51,6 +51,16 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: /entrar|criar sala/i })).toBeDefined()
   })
 
+  it('explica limites, persistencia e privacidade sem exigir conta', () => {
+    renderHome()
+    expect(screen.getByRole('heading', { name: /perguntas frequentes/i })).toBeDefined()
+    expect(screen.getByText(/Quais vídeos funcionam/i)).toBeDefined()
+    expect(screen.getByText(/Quem controla o vídeo/i)).toBeDefined()
+    expect(screen.getByRole('heading', { name: /privacidade nesta versão/i })).toBeDefined()
+    expect(screen.getByText(/não são usados para publicidade/i)).toBeDefined()
+    expect(screen.getByRole('link', { name: /aviso completo de privacidade/i }).getAttribute('href')).toBe('/privacidade.html')
+  })
+
   it('fetch e restaurado entre testes (nao vaza entre testes)', () => {
     // Verifica que fetch foi stubado pelo beforeEach (nao esta como undefined ou funcao nativa)
     // e que e um mock vi.fn() fresco (sem chamadas anteriores)

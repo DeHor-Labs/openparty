@@ -58,7 +58,7 @@ export function Home() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
             <label htmlFor="media-url" className="text-sm font-medium">
-              URL do video
+              URL do vídeo
             </label>
             <input
               id="media-url"
@@ -126,6 +126,52 @@ export function Home() {
             {loading ? 'Criando sala...' : 'Entrar na sala'}
           </button>
         </form>
+
+        <section id="faq" aria-labelledby="faq-title" className="space-y-3 border-t border-border pt-6">
+          <h2 id="faq-title" className="text-xl font-semibold">Perguntas frequentes</h2>
+          {[
+            [
+              'Quais vídeos funcionam?',
+              'A sala reconhece links do YouTube e arquivos MP4 acessíveis pelo navegador. Serviços protegidos por DRM dependem da extensão e do adaptador correspondente.',
+            ],
+            [
+              'Preciso criar uma conta?',
+              'Não. Você informa um nickname e escolhe um avatar para entrar na sala.',
+            ],
+            [
+              'A sala fica salva?',
+              'Não nesta versão. A sala vive na memória do servidor e é removida quando a última pessoa sai.',
+            ],
+            [
+              'O chat é armazenado?',
+              'Não. As mensagens e reações são transmitidas às pessoas conectadas e não são gravadas em banco de dados pelo OpenParty.',
+            ],
+            [
+              'Quem controla o vídeo?',
+              'A primeira pessoa da sala assume o controle. Se ela sair, o servidor transfere a função para a pessoa conectada há mais tempo.',
+            ],
+          ].map(([question, answer]) => (
+            <details key={question} className="rounded-md border border-input px-3 py-2 text-sm">
+              <summary className="cursor-pointer font-medium">{question}</summary>
+              <p className="mt-2 text-muted-foreground">{answer}</p>
+            </details>
+          ))}
+        </section>
+
+        <section id="privacidade" aria-labelledby="privacy-title" className="space-y-2 border-t border-border pt-6 text-sm">
+          <h2 id="privacy-title" className="text-xl font-semibold">Privacidade nesta versão</h2>
+          <p className="text-muted-foreground">
+            Nickname e avatar ficam no sessionStorage do navegador e são enviados ao servidor durante
+            a conexão. A URL do vídeo também é enviada para criar a sala. Estado, chat e reações ficam
+            apenas na memória durante a sessão e não são usados para publicidade ou perfilamento pelo
+            OpenParty.
+          </p>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <a href="/privacidade.html" className="underline underline-offset-4">Aviso completo de privacidade</a>
+            <a href="/index.md" className="underline underline-offset-4">Versão em Markdown</a>
+            <a href="/llms.txt" className="underline underline-offset-4">Guia para assistentes</a>
+          </div>
+        </section>
       </div>
     </main>
   )
