@@ -1,0 +1,20 @@
+# OpenParty
+
+> Aplicação para criar salas temporárias e assistir a vídeos em sincronia por WebSocket.
+
+Site: https://openparty.dehor.com.br/
+Representação em Markdown: https://openparty.dehor.com.br/index.md
+Perguntas frequentes: https://openparty.dehor.com.br/#faq
+Privacidade: https://openparty.dehor.com.br/privacidade.html
+
+## Capacidades
+
+- Criação de sala a partir de URL do YouTube ou MP4 acessível.
+- Sincronização de play, pause, seek e relógio.
+- Presença, chat, reações e transferência de host.
+
+## Limites
+
+- Salas e mensagens não persistem após o encerramento da sessão.
+- Serviços protegidos por DRM exigem extensão e adaptador compatível.
+- O repositório contém testes técnicos; disponibilidade pública precisa ser verificada separadamente.
