@@ -15,7 +15,7 @@
 FROM oven/bun:1-alpine AS deps
 
 # pnpm e necessario para gerenciar o workspace turbo
-RUN npm install -g pnpm
+RUN bun add -g pnpm@9.4.0
 
 WORKDIR /app
 
