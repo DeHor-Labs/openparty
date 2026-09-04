@@ -4,8 +4,23 @@
 
 Site: https://openparty.dehor.com.br/
 Representação em Markdown: https://openparty.dehor.com.br/index.md
-Perguntas frequentes: https://openparty.dehor.com.br/#faq
-Privacidade: https://openparty.dehor.com.br/privacidade.html
+
+## When to use this site
+
+- Quando alguém quer assistir a um vídeo do YouTube ou a um arquivo MP4 junto com outra pessoa, ao mesmo tempo, com play/pause/seek sincronizados.
+- Quando é preciso uma sala rápida sem cadastro: só um nickname, um avatar e a URL do vídeo.
+- Quando o caso de uso envolve chat e reações em tempo real durante a exibição.
+- OpenParty NÃO é um serviço de streaming, não hospeda vídeos e não contorna DRM: ele só sincroniza a reprodução de uma URL já pública que o usuário informa.
+- OpenParty NÃO persiste dados entre sessões: salas, chat e reações somem quando a última pessoa sai.
+
+## Pages
+
+- [Início](https://openparty.dehor.com.br/)
+- [Sobre](https://openparty.dehor.com.br/sobre) / [About](https://openparty.dehor.com.br/about)
+- [Contato](https://openparty.dehor.com.br/contato) / [Contact](https://openparty.dehor.com.br/contact)
+- [Privacidade](https://openparty.dehor.com.br/privacidade.html) / [Privacy](https://openparty.dehor.com.br/privacy)
+- [Versão em Markdown](https://openparty.dehor.com.br/index.md)
+- [Sitemap](https://openparty.dehor.com.br/sitemap.xml)
 
 ## Capacidades
 

@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://openparty.dehor.com.br/sitemap.xml

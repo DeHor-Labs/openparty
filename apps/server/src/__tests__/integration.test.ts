@@ -418,6 +418,113 @@ describe('serve estatico (single-origin)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 404 real para paths desconhecidos (agent-friendly-404): nao pode devolver
+// 200 com o app shell para qualquer caminho, como fazia o fallback SPA puro.
+// ---------------------------------------------------------------------------
+
+describe('404 real para paths desconhecidos', () => {
+  it('GET /caminho-inexistente retorna 404 (nao 200) mesmo com middlewares de static/SPA injetados', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/caminho-inexistente', { method: 'GET' })
+
+    expect(res.status).toBe(404)
+  })
+
+  it('GET /room/abc123 (rota client-side conhecida) continua servindo o index.html com 200', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/room/abc123', { method: 'GET' })
+
+    expect(res.status).toBe(200)
+  })
+
+  it('404 com Accept: application/json devolve application/problem+json', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/openapi.json', {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    })
+
+    expect(res.status).toBe(404)
+    expect(res.headers.get('content-type')).toContain('application/problem+json')
+    const body = await res.json() as { status: number; detail: string }
+    expect(body.status).toBe(404)
+  })
+
+  it('404 com Accept: text/html devolve HTML com status 404', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/pagina-que-nao-existe', {
+      method: 'GET',
+      headers: { accept: 'text/html' },
+    })
+
+    expect(res.status).toBe(404)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(res.headers.get('x-robots-tag')).toBe('noindex')
+    const body = await res.text()
+    expect(body).toContain('<h1>')
+  })
+
+  it('404 sem Accept especifico devolve markdown por padrao, com Vary: Accept', async () => {
+    const { createApp } = await import('../index')
+    const { staticMiddleware, spaFallback } = makeFakeStaticOptions()
+    const app = createApp({ staticMiddleware, spaFallback })
+
+    const res = await app.request('/qualquer-coisa', { method: 'GET' })
+
+    expect(res.status).toBe(404)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(res.headers.get('vary')).toContain('Accept')
+    const body = await res.text()
+    expect(body).toContain('/sitemap.xml')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Negociacao de conteudo em GET / (markdown-negotiation-vary / acceptmarkdown.com)
+// ---------------------------------------------------------------------------
+
+describe('createHomeMiddleware: negociacao de Accept na home', () => {
+  it('Accept: text/markdown devolve o index.md com Vary: Accept', async () => {
+    const { createApp, createHomeMiddleware } = await import('../index')
+    const homeMiddleware = createHomeMiddleware(FAKE_INDEX_HTML, '# OpenParty\n\nConteudo em markdown.')
+    const app = createApp({ homeMiddleware })
+
+    const res = await app.request('/', { method: 'GET', headers: { accept: 'text/markdown' } })
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(res.headers.get('vary')).toContain('Accept')
+    const body = await res.text()
+    expect(body).toContain('Conteudo em markdown')
+  })
+
+  it('sem Accept: text/markdown devolve o HTML normal com Link para sitemap/index.md/llms.txt', async () => {
+    const { createApp, createHomeMiddleware } = await import('../index')
+    const homeMiddleware = createHomeMiddleware(FAKE_INDEX_HTML, '# OpenParty')
+    const app = createApp({ homeMiddleware })
+
+    const res = await app.request('/', { method: 'GET', headers: { accept: 'text/html' } })
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(res.headers.get('vary')).toContain('Accept')
+    expect(res.headers.get('link')).toContain('/index.md')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Regressao: joinRoom com roomId invalido nao derruba o processo
 // ---------------------------------------------------------------------------
 
