@@ -45,10 +45,11 @@ export function isKnownClientRoute(pathname: string): boolean {
 
 function acceptsMarkdown(accept: string | undefined | null): boolean {
   if (!accept) return false
-  if (!accept.includes('text/markdown')) return false
+  const raw = accept
+  if (!raw.includes('text/markdown')) return false
 
   function getQ(mime: string): number {
-    const parts = accept.split(',')
+    const parts = raw.split(',')
     for (const part of parts) {
       const [type, ...params] = part.trim().split(';')
       if (type.trim() === mime) {
