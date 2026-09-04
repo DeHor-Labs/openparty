@@ -58,9 +58,15 @@ FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
+# node_modules de producao (resolve todas as deps de runtime via pnpm virtual store)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/server/node_modules ./apps/server/node_modules
+COPY --from=builder /app/packages/protocol/node_modules ./packages/protocol/node_modules
+
 # Artefatos do protocolo (dependencia de runtime do servidor)
 COPY --from=builder /app/packages/protocol/dist ./packages/protocol/dist
-COPY --from=builder /app/packages/protocol/package.json ./packages/protocol/package.json
+# package.json corrigido para apontar para dist (main aponta para src no monorepo)
+RUN printf '{"name":"@openparty/protocol","version":"0.0.1","type":"module","main":"./dist/index.js","exports":{".": "./dist/index.js"}}' > ./packages/protocol/package.json
 
 # Artefatos do servidor compilado
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
