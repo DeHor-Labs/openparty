@@ -1,7 +1,7 @@
 // apps/server/src/index.ts
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { nanoid } from 'nanoid'
 import type {
   ClientEvent,
@@ -29,6 +29,106 @@ import { handleHostLock } from './handlers/host-lock'
 import { applyRateLimit, resetRateLimit } from './rate-limiter'
 
 const MEDIA_URL_MAX = 2048
+
+const SITE_URL = 'https://openparty.dehor.com.br'
+
+/**
+ * Rotas client-side reais do react-router (apps/web/src/App.tsx).
+ * Qualquer caminho fora desta lista que nao seja um arquivo estatico existente
+ * recebe 404 real (ver renderNotFound), em vez do soft-404 do fallback SPA.
+ */
+const CLIENT_ROUTE_PATTERNS: RegExp[] = [/^\/$/, /^\/room\/[^/]+$/]
+
+export function isKnownClientRoute(pathname: string): boolean {
+  return CLIENT_ROUTE_PATTERNS.some((pattern) => pattern.test(pathname))
+}
+
+/** Aceita markdown apenas quando o cliente pede explicitamente e nao lista text/html junto (evita sequestrar navegadores comuns). */
+function acceptsMarkdown(accept: string | undefined | null): boolean {
+  if (!accept) return false
+  return /text\/markdown/i.test(accept) && !/text\/html/i.test(accept)
+}
+
+const NOT_FOUND_MARKDOWN = `# Página não encontrada (404)
+
+O endereço solicitado não existe no OpenParty.
+
+- [Início](${SITE_URL}/)
+- [Guia para agentes](${SITE_URL}/llms.txt)
+- [Mapa em markdown](${SITE_URL}/index.md)
+- [Sitemap](${SITE_URL}/sitemap.xml)
+`
+
+const NOT_FOUND_HTML = `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Página não encontrada | OpenParty</title>
+<meta name="robots" content="noindex">
+</head>
+<body>
+<h1>Página não encontrada</h1>
+<p>O endereço solicitado não existe no OpenParty.</p>
+<ul>
+<li><a href="/">Início</a></li>
+<li><a href="/llms.txt">Guia para agentes</a></li>
+<li><a href="/index.md">Mapa em markdown</a></li>
+<li><a href="/sitemap.xml">Sitemap</a></li>
+</ul>
+</body>
+</html>`
+
+/**
+ * 404 real (nunca 200) para paths desconhecidos, com corpo negociado por Accept:
+ * application/problem+json, text/html ou text/markdown (padrao). Cache curto
+ * em vez de no-store para nao forcar a funcao a rodar em toda varredura de bot.
+ */
+export function renderNotFound(c: Context): Response {
+  const accept = c.req.header('accept') ?? ''
+  c.header('Vary', 'Accept')
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=300')
+  c.header('X-Robots-Tag', 'noindex')
+
+  if (/application\/json/i.test(accept)) {
+    return c.body(
+      JSON.stringify({
+        type: 'about:blank',
+        title: 'Not Found',
+        status: 404,
+        detail: 'O endereço solicitado não existe no OpenParty.',
+      }),
+      404,
+      { 'Content-Type': 'application/problem+json' }
+    )
+  }
+
+  if (/text\/html/i.test(accept)) {
+    return c.html(NOT_FOUND_HTML, 404)
+  }
+
+  return c.body(NOT_FOUND_MARKDOWN, 404, { 'Content-Type': 'text/markdown; charset=utf-8' })
+}
+
+/**
+ * Handler de GET / com negociacao de conteudo: markdown para agentes que pedem
+ * Accept: text/markdown (acceptmarkdown.com), HTML estatico (com Link para
+ * sitemap/index.md/llms.txt) para o resto. `indexHtml`/`indexMd` sao lidos uma
+ * unica vez na subida do servidor (ver bloco import.meta.main).
+ */
+export function createHomeMiddleware(indexHtml: string, indexMd: string): MiddlewareHandler {
+  return async (c) => {
+    c.header('Vary', 'Accept')
+    if (indexMd && acceptsMarkdown(c.req.header('accept'))) {
+      c.header('Link', `<${SITE_URL}/>; rel="canonical"; type="text/html"`)
+      return c.body(indexMd, 200, { 'Content-Type': 'text/markdown; charset=utf-8' })
+    }
+    c.header(
+      'Link',
+      '</sitemap.xml>; rel="sitemap"; type="application/xml", </index.md>; rel="alternate"; type="text/markdown", </llms.txt>; rel="describedby"; type="text/plain"'
+    )
+    return c.html(indexHtml)
+  }
+}
 
 /**
  * Numero maximo de frames invalidos aceitos por conexao antes de fechar com 1002.
@@ -89,14 +189,16 @@ function isValidMediaUrl(value: unknown): value is string {
 
 /**
  * Opcoes de criacao do app Hono.
- * staticMiddleware: serve arquivos do dist do Vite (JS, CSS, imagens).
- * spaFallback: serve index.html para rotas desconhecidas (react-router).
- * Ambos sao injetados apenas em producao (runtime Bun) para nao poluir
+ * staticMiddleware: serve arquivos do dist do Vite (JS, CSS, imagens, public/*).
+ * spaFallback: serve index.html para as rotas client-side conhecidas (react-router).
+ * homeMiddleware: GET / com negociacao Accept (markdown para agentes, HTML com Link para o resto).
+ * Todos sao injetados apenas em producao (runtime Bun) para nao poluir
  * o ambiente de testes Node/Vitest, onde Bun nao existe.
  */
 export interface CreateAppOptions {
   staticMiddleware?: MiddlewareHandler
   spaFallback?: MiddlewareHandler
+  homeMiddleware?: MiddlewareHandler
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -139,15 +241,30 @@ export function createApp(options: CreateAppOptions = {}) {
   // Em testes (Vitest/Node), nenhum middleware e passado e este bloco
   // e ignorado, preservando o comportamento de dev.
   // ---------------------------------------------------------------------------
+  if (options.homeMiddleware) {
+    // GET / com negociacao de Accept, registrado ANTES do static middleware
+    // para poder responder markdown a agentes antes que o arquivo index.html
+    // seja servido cru.
+    app.get('/', options.homeMiddleware)
+  }
+
   if (options.staticMiddleware) {
-    // Arquivos estaticos (JS, CSS, imagens, favicon, etc.)
+    // Arquivos estaticos (JS, CSS, imagens, favicon, public/*, etc.)
     app.use('/*', options.staticMiddleware)
   }
 
   if (options.spaFallback) {
-    // Fallback SPA: qualquer rota GET nao capturada pelos handlers acima
-    // (ex: /room/abc) devolve o index.html para o react-router tratar.
-    app.get('*', options.spaFallback)
+    // Qualquer rota GET nao capturada pelos handlers acima: se for uma rota
+    // client-side conhecida do react-router (ex: /room/abc), devolve o
+    // index.html; qualquer outro caminho recebe 404 real (nunca soft-404).
+    app.get('*', async (c, next) => {
+      const pathname = new URL(c.req.url).pathname
+      if (isKnownClientRoute(pathname)) {
+        const res = await options.spaFallback!(c, next)
+        return res ?? renderNotFound(c)
+      }
+      return renderNotFound(c)
+    })
   }
 
   return app
@@ -175,15 +292,22 @@ if (import.meta.main) {
   const staticDir = process.env['STATIC_DIR']
   let staticMiddleware: MiddlewareHandler | undefined
   let spaFallback: MiddlewareHandler | undefined
+  let homeMiddleware: MiddlewareHandler | undefined
   if (staticDir) {
     const { serveStatic } = await import('hono/bun')
-    // Serve arquivos estaticos do dist (JS, CSS, imagens, etc.)
-    staticMiddleware = serveStatic({ root: staticDir })
-    // Fallback SPA: rotas de pagina como /room/abc retornam index.html
+    // Serve arquivos estaticos do dist (JS, CSS, imagens, public/*, etc.).
+    // mimes.md corrige o Content-Type de /index.md, que o hono nao reconhece por padrao.
+    staticMiddleware = serveStatic({ root: staticDir, mimes: { md: 'text/markdown; charset=utf-8' } })
+    // Fallback SPA: rotas client-side conhecidas (ex: /room/abc) retornam index.html
     spaFallback = serveStatic({ path: `${staticDir}/index.html` })
+
+    // Lidos uma unica vez na subida: usados pela negociacao de conteudo de GET /.
+    const indexHtml = await Bun.file(`${staticDir}/index.html`).text()
+    const indexMd = await Bun.file(`${staticDir}/index.md`).text().catch(() => '')
+    homeMiddleware = createHomeMiddleware(indexHtml, indexMd)
   }
 
-  const app = createApp({ staticMiddleware, spaFallback })
+  const app = createApp({ staticMiddleware, spaFallback, homeMiddleware })
 
   const server = Bun.serve<WsData>({
     port: Number(process.env['PORT'] ?? 3000),

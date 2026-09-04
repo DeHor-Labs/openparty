@@ -7,11 +7,129 @@
     <title>OpenParty - Assista junto</title>
     <meta name="description" content="Crie uma sala para assistir a vídeos em sincronia com outras pessoas, com chat e reações em tempo real." />
     <meta name="robots" content="index,follow" />
+    <meta name="author" content="Nikolas de Hor" />
+    <link rel="canonical" href="https://openparty.dehor.com.br/" />
     <link rel="alternate" type="text/markdown" href="/index.md" title="OpenParty em Markdown" />
     <link rel="describedby" href="/llms.txt" />
+
+    <meta property="og:title" content="OpenParty - Assista junto, sincronizado" />
+    <meta property="og:description" content="Crie uma sala para assistir a vídeos do YouTube ou MP4 em sincronia com outras pessoas, com chat e reações em tempo real, sem plugins e sem conta." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://openparty.dehor.com.br/" />
+    <meta property="og:site_name" content="OpenParty" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:image" content="https://openparty.dehor.com.br/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="OpenParty, assista vídeos juntos, sincronizados" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://openparty.dehor.com.br/og-image.png" />
+    <meta name="twitter:title" content="OpenParty - Assista junto, sincronizado" />
+    <meta name="twitter:description" content="Salas temporárias para assistir a vídeos em sincronia, com chat e reações em tempo real." />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "OpenParty",
+        "url": "https://openparty.dehor.com.br/",
+        "description": "Aplicação para criar salas temporárias e assistir a vídeos em sincronia por WebSocket, com chat e reações em tempo real.",
+        "inLanguage": "pt-BR"
+      }
+    </script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "OpenParty",
+        "url": "https://openparty.dehor.com.br/",
+        "description": "Crie uma sala para assistir a vídeos do YouTube ou de arquivos MP4 em sincronia com outras pessoas, com chat, reações e controle de reprodução em tempo real, sem plugins e sem criar conta.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "isAccessibleForFree": true,
+        "author": {
+          "@type": "Person",
+          "name": "Nikolas de Hor"
+        }
+      }
+    </script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": "Nikolas de Hor",
+        "email": "mailto:nikolasdehor79@gmail.com",
+        "url": "https://openparty.dehor.com.br/sobre",
+        "sameAs": [
+          "https://github.com/nikolasdehor",
+          "https://github.com/nikolasdehor/openparty"
+        ],
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": "Goiânia",
+          "addressRegion": "GO",
+          "addressCountry": "BR"
+        },
+        "contactPoint": {
+          "@type": "ContactPoint",
+          "email": "nikolasdehor79@gmail.com",
+          "contactType": "technical support",
+          "availableLanguage": ["pt-BR"]
+        }
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Conteúdo estático servido no HTML bruto: lido por crawlers e agentes de IA antes da hidratação. O React substitui este bloco ao montar. -->
+      <header>
+        <p>OpenParty · sala temporária, sem conta</p>
+        <h1>OpenParty: assista vídeos juntos, sincronizados</h1>
+        <p>
+          Crie uma sala para assistir a vídeos do YouTube ou de arquivos MP4 junto com outras
+          pessoas, tudo sincronizado, com chat, reações e sem precisar instalar plugin nem criar
+          conta. Basta colar a URL do vídeo, escolher um nickname e compartilhar o link da sala.
+        </p>
+      </header>
+      <main>
+        <section>
+          <h2>Como funciona</h2>
+          <ol>
+            <li>Uma pessoa informa a URL de um vídeo e cria a sala.</li>
+            <li>O servidor mantém o estado de reprodução e distribui eventos por WebSocket.</li>
+            <li>Participantes entram com nickname e avatar, conversam e recebem os mesmos eventos de play, pause e seek.</li>
+          </ol>
+        </section>
+        <section>
+          <h2>Perguntas frequentes</h2>
+          <dl>
+            <dt>Quais vídeos funcionam?</dt>
+            <dd>A sala reconhece links do YouTube e arquivos MP4 acessíveis pelo navegador. Serviços protegidos por DRM dependem da extensão e do adaptador correspondente.</dd>
+            <dt>Preciso criar uma conta?</dt>
+            <dd>Não. Você informa um nickname e escolhe um avatar para entrar na sala.</dd>
+            <dt>A sala fica salva?</dt>
+            <dd>Não nesta versão. A sala vive na memória do servidor e é removida quando a última pessoa sai.</dd>
+            <dt>O chat é armazenado?</dt>
+            <dd>Não. As mensagens e reações são transmitidas às pessoas conectadas e não são gravadas em banco de dados pelo OpenParty.</dd>
+            <dt>Quem controla o vídeo?</dt>
+            <dd>A primeira pessoa da sala assume o controle. Se ela sair, o servidor transfere a função para a pessoa conectada há mais tempo.</dd>
+          </dl>
+        </section>
+        <section>
+          <h2>Navegação</h2>
+          <ul>
+            <li><a href="/sobre">Sobre</a> · <a href="/about">About</a></li>
+            <li><a href="/contato">Contato</a> · <a href="/contact">Contact</a></li>
+            <li><a href="/privacidade.html">Privacidade</a> · <a href="/privacy">Privacy</a></li>
+            <li><a href="/index.md">Versão em markdown</a> · <a href="/llms.txt">llms.txt para agentes de IA</a> · <a href="/sitemap.xml">Sitemap</a></li>
+            <li><a href="https://github.com/nikolasdehor/openparty">Código fonte no GitHub</a> · <a href="mailto:nikolasdehor79@gmail.com">nikolasdehor79@gmail.com</a></li>
+          </ul>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
