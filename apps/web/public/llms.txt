@@ -5,31 +5,35 @@
 Site: https://openparty.dehor.com.br/
 Representação em Markdown: https://openparty.dehor.com.br/index.md
 
-## When to use this site
+## When to use / Quando usar
 
-- Quando alguém quer assistir a um vídeo do YouTube ou a um arquivo MP4 junto com outra pessoa, ao mesmo tempo, com play/pause/seek sincronizados.
-- Quando é preciso uma sala rápida sem cadastro: só um nickname, um avatar e a URL do vídeo.
-- Quando o caso de uso envolve chat e reações em tempo real durante a exibição.
-- OpenParty NÃO é um serviço de streaming, não hospeda vídeos e não contorna DRM: ele só sincroniza a reprodução de uma URL já pública que o usuário informa.
-- OpenParty NÃO persiste dados entre sessões: salas, chat e reações somem quando a última pessoa sai.
+- Quando você quer assistir a um vídeo do YouTube ou arquivo MP4 junto com amigos ou colaboradores em sincronia perfeita (play, pause, seek).
+- Quando você precisa de uma sala rápida sem cadastro e sem instalação de plugins.
+- Para sessões de watch party com chat e reações em tempo real.
+
+## When not to use / Quando não usar
+
+- Não use como serviço de streaming ou hospedagem de arquivos de mídia (o OpenParty não armazena vídeos).
+- Não use para conteúdo protegido por DRM ou transmissões privadas sem suporte de extensão.
+- Não use para armazenar histórico de mensagens ou persistência de dados (salas e chats são temporários e efêmeros).
+
+## Authentication and access / Autenticação e acesso
+
+- Acesso totalmente público e gratuito, sem necessidade de login, autenticação, cadastro ou API keys.
+- Para criar ou entrar em uma sala, basta informar um nickname e avatar opcional.
+- Destructive actions: Não há ações destrutivas permanentes; encerrar a sala remove os dados efêmeros da memória do servidor.
+
+## Operational limits and fallbacks / Limites operacionais e fallbacks
+
+- Limite de conexões e sincronização em tempo real via WebSocket.
+- Fallback: Em caso de falha de conexão WebSocket, o cliente reconecta automaticamente ou exibe fallback visual para recarregar o player.
+- As salas vivem na memória do servidor e são descartadas quando o último usuário sai.
 
 ## Pages
 
 - [Início](https://openparty.dehor.com.br/)
-- [Sobre](https://openparty.dehor.com.br/sobre) / [About](https://openparty.dehor.com.br/about)
-- [Contato](https://openparty.dehor.com.br/contato) / [Contact](https://openparty.dehor.com.br/contact)
-- [Privacidade](https://openparty.dehor.com.br/privacidade.html) / [Privacy](https://openparty.dehor.com.br/privacy)
+- [Sobre](https://openparty.dehor.com.br/sobre)
+- [Contato](https://openparty.dehor.com.br/contato)
+- [Privacidade](https://openparty.dehor.com.br/privacidade.html)
 - [Versão em Markdown](https://openparty.dehor.com.br/index.md)
 - [Sitemap](https://openparty.dehor.com.br/sitemap.xml)
-
-## Capacidades
-
-- Criação de sala a partir de URL do YouTube ou MP4 acessível.
-- Sincronização de play, pause, seek e relógio.
-- Presença, chat, reações e transferência de host.
-
-## Limites
-
-- Salas e mensagens não persistem após o encerramento da sessão.
-- Serviços protegidos por DRM exigem extensão e adaptador compatível.
-- O repositório contém testes técnicos; disponibilidade pública precisa ser verificada separadamente.

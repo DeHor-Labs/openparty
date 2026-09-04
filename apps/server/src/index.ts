@@ -43,10 +43,35 @@ export function isKnownClientRoute(pathname: string): boolean {
   return CLIENT_ROUTE_PATTERNS.some((pattern) => pattern.test(pathname))
 }
 
-/** Aceita markdown apenas quando o cliente pede explicitamente e nao lista text/html junto (evita sequestrar navegadores comuns). */
 function acceptsMarkdown(accept: string | undefined | null): boolean {
   if (!accept) return false
-  return /text\/markdown/i.test(accept) && !/text\/html/i.test(accept)
+  if (!accept.includes('text/markdown')) return false
+
+  function getQ(mime: string): number {
+    const parts = accept.split(',')
+    for (const part of parts) {
+      const [type, ...params] = part.trim().split(';')
+      if (type.trim() === mime) {
+        for (const p of params) {
+          const [k, v] = p.trim().split('=')
+          if (k.trim() === 'q') {
+            const val = parseFloat(v)
+            return isNaN(val) ? 1.0 : val
+          }
+        }
+        return 1.0
+      }
+    }
+    return -1
+  }
+
+  const qMarkdown = getQ('text/markdown')
+  if (qMarkdown <= 0) return false
+
+  const qHtml = getQ('text/html')
+  if (qHtml >= 0 && qHtml > qMarkdown) return false
+
+  return true
 }
 
 const NOT_FOUND_MARKDOWN = `# Página não encontrada (404)
@@ -88,17 +113,27 @@ export function renderNotFound(c: Context): Response {
   c.header('Vary', 'Accept')
   c.header('Cache-Control', 'public, max-age=60, s-maxage=300')
   c.header('X-Robots-Tag', 'noindex')
+  c.header(
+    'Link',
+    '</sitemap.xml>; rel="sitemap"; type="application/xml", </index.md>; rel="alternate"; type="text/markdown", </llms.txt>; rel="describedby"; type="text/plain"'
+  )
 
-  if (/application\/json/i.test(accept)) {
+  if (/application\/json/i.test(accept) || /application\/problem\+json/i.test(accept)) {
     return c.body(
       JSON.stringify({
         type: 'about:blank',
         title: 'Not Found',
         status: 404,
         detail: 'O endereço solicitado não existe no OpenParty.',
+        links: {
+          home: `${SITE_URL}/`,
+          markdown: `${SITE_URL}/index.md`,
+          llms: `${SITE_URL}/llms.txt`,
+          sitemap: `${SITE_URL}/sitemap.xml`,
+        },
       }),
       404,
-      { 'Content-Type': 'application/problem+json' }
+      { 'Content-Type': 'application/problem+json; charset=utf-8' }
     )
   }
 
@@ -208,6 +243,19 @@ export function createApp(options: CreateAppOptions = {}) {
   // Em self-host ou desenvolvimento: ALLOWED_ORIGIN nao definida => '*' (permissivo).
   // Em producao: definir ALLOWED_ORIGIN com a origem exata do frontend.
   app.use('*', cors({ origin: process.env['ALLOWED_ORIGIN'] ?? '*' }))
+
+  // Headers de seguranca HTTP
+  app.use('*', async (c, next) => {
+    await next()
+    c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    c.header('X-Frame-Options', 'SAMEORIGIN')
+    c.header('X-Content-Type-Options', 'nosniff')
+    c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+    c.header(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self' wss: ws: https:; font-src 'self' data:; media-src 'self' https: blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; base-uri 'self'; object-src 'none'"
+    )
+  })
 
   app.post('/rooms', async (c) => {
     const body = await c.req.json().catch(() => null)

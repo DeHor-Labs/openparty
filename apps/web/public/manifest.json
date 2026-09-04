@@ -1,0 +1,16 @@
+{
+  "name": "OpenParty",
+  "short_name": "OpenParty",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "description": "Salas temporárias para assistir a vídeos em sincronia, com chat e reações em tempo real.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
