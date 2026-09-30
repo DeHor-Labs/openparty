@@ -5,6 +5,61 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenParty - Assista junto</title>
+    <!-- Anti-flash: fundo da LP + fallback SEO escondido antes do React montar.
+         Inline para valer no primeiro paint, sem depender do bundle CSS/JS. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #f9f9f9;
+      }
+      html.dark,
+      html.dark body {
+        background: #1f1f1f;
+      }
+      #root > .seo-fallback {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        margin: -1px !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        clip: rect(0 0 0 0) !important;
+        clip-path: inset(50%) !important;
+        border: 0 !important;
+        white-space: nowrap !important;
+      }
+    </style>
+    <script>
+      // Aplica o tema (mesma regra de src/lib/theme.ts) antes do primeiro
+      // paint para nao piscar claro/escuro ate o React montar.
+      (function () {
+        try {
+          var t = localStorage.getItem("openparty-theme");
+          if (t !== "light" && t !== "dark") {
+            t = window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          if (t === "dark") document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+    <noscript>
+      <style>
+        #root > .seo-fallback {
+          position: static !important;
+          width: auto !important;
+          height: auto !important;
+          margin: 0 !important;
+          overflow: visible !important;
+          clip: auto !important;
+          clip-path: none !important;
+          white-space: normal !important;
+        }
+      </style>
+    </noscript>
     <meta name="description" content="Crie uma sala para assistir a vídeos em sincronia com outras pessoas, com chat e reações em tempo real." />
     <meta name="robots" content="index,follow" />
     <meta name="author" content="Nikolas de Hor" />
@@ -86,7 +141,8 @@
   </head>
   <body>
     <div id="root">
-      <!-- Conteúdo estático servido no HTML bruto: lido por crawlers e agentes de IA antes da hidratação. O React substitui este bloco ao montar. -->
+      <!-- Conteúdo estático servido no HTML bruto: lido por crawlers e agentes de IA antes da hidratação. O React substitui este bloco ao montar. Visualmente escondido via CSS inline no <head> para não exibir texto sem estilo (flash branco) antes do mount. -->
+      <div class="seo-fallback">
       <header>
         <p>OpenParty · sala temporária, sem conta</p>
         <h1>OpenParty: assista vídeos juntos, sincronizados</h1>
@@ -131,6 +187,7 @@
           </ul>
         </section>
       </main>
+      </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
