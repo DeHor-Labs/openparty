@@ -15,7 +15,7 @@ function clarityScripts() {
 describe('shouldLoadClarity', () => {
   it('carrega no dominio de producao e no www', () => {
     expect(shouldLoadClarity('openparty.dehor.com.br', '/')).toBe(true)
-    expect(shouldLoadClarity('www.openparty.dehor.com.br', '/privacidade.html')).toBe(true)
+    expect(shouldLoadClarity('www.openparty.dehor.com.br', '/')).toBe(true)
   })
 
   it('nao carrega em localhost, preview ou dominio parecido', () => {
@@ -27,6 +27,8 @@ describe('shouldLoadClarity', () => {
   it('nao carrega nas rotas de sala', () => {
     expect(shouldLoadClarity('openparty.dehor.com.br', '/room/abc123')).toBe(false)
     expect(shouldLoadClarity('openparty.dehor.com.br', '/room')).toBe(false)
+    expect(shouldLoadClarity('openparty.dehor.com.br', '/ROOM/abc123')).toBe(false)
+    expect(shouldLoadClarity('openparty.dehor.com.br', '/%72oom/abc123')).toBe(false)
   })
 })
 

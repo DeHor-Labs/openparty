@@ -7,18 +7,17 @@ export const CLARITY_PROJECT_ID = 'zixh9yg5c8'
 const PRODUCTION_HOSTS = ['openparty.dehor.com.br', 'www.openparty.dehor.com.br']
 
 // Salas (/room/:id) mostram nickname, chat e a URL carrega o convite da sala:
-// o Clarity nunca e carregado nelas. Como nao ha API para parar a gravacao,
-// quem sai da landing para uma sala deve usar carga completa de pagina
+// o Clarity so carrega na landing exata ('/'). Allowlist em vez de bloquear
+// '/room', porque o router aceita /ROOM e /%72oom. Como nao ha API para parar a
+// gravacao, quem sai da landing para uma sala usa carga completa de pagina
 // (ver isClarityActive em Home.tsx).
-const PRIVATE_PATH_PREFIXES = ['/room']
+const LANDING_PATH = '/'
 
 type ClarityFn = ((...args: unknown[]) => void) & { q?: unknown[] }
 
 export function shouldLoadClarity(hostname: string, pathname: string): boolean {
   if (!PRODUCTION_HOSTS.includes(hostname)) return false
-  return !PRIVATE_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  )
+  return pathname === LANDING_PATH
 }
 
 export function isClarityActive(): boolean {
