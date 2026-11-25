@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
+import { isClarityActive } from '../lib/clarity'
 
 const AVATAR_OPTIONS = ['🎬', '🍿', '🎮', '🎵', '🦊', '🐻', '🐼', '🦁']
 
@@ -36,7 +37,10 @@ export function Home() {
       }
       sessionStorage.setItem('op_nickname', nickname)
       sessionStorage.setItem('op_avatar', avatar)
-      navigate(`/room/${data.roomId}`)
+      const roomPath = `/room/${data.roomId}`
+      // Clarity nao tem API para parar: se ativo, carga completa para a sala ficar fora da gravacao.
+      if (isClarityActive()) window.location.assign(roomPath)
+      else navigate(roomPath)
     } catch {
       setError('Falha de rede. Tente novamente.')
     } finally {
